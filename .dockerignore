@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables (Security best practice)
+.env
+
+# OS and IDE generated files
+.DS_Store
+.vscode/
+.idea/

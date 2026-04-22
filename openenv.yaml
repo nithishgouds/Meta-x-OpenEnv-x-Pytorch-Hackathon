@@ -1,0 +1,15 @@
+name: opssim_ai
+description: "OpsSim-AI: Distributed War Room — Multi-Agent Cascading Failure System"
+version: "1.0.0"
+authors:
+  - Sandeep
+  - Venkatesh
+  - Nithish
+tags:
+  - openenv
+  - multi-agent
+  - cascading-failure
+entry_point: env:DevOpsEnv
+
+tasks:
+  - name: cascade

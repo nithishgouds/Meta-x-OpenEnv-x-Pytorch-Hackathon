@@ -1,0 +1,28 @@
+[project]
+name = "opssim_ai"
+version = "1.0.0"
+description = "OpsSim-AI: Distributed War Room — Multi-Agent Cascading Failure System"
+requires-python = ">=3.11"
+authors = [{ name = "Sandeep, Venkatesh, Nithish" }]
+dependencies = [
+    "pydantic",
+    "openai",
+    "requests",
+    "python-dotenv",
+    "openenv-core @ git+https://github.com/meta-pytorch/OpenEnv.git",
+    "fastapi",
+    "uvicorn"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.setuptools]
+py-modules = ["env", "models", "inference", "multi_agent", "train"]
+
+[tool.setuptools.packages.find]
+include = ["server"]
