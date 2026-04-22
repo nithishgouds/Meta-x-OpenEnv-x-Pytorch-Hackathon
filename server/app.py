@@ -8,7 +8,7 @@ from multi_agent import WarRoom
 
 app = FastAPI(title="OpsSim-AI War Room API")
 
-war_room = WarRoom(seed=42, max_steps=15)
+war_room = WarRoom(seed=42, max_steps=30)
 
 
 class DirectiveRequest(BaseModel):
