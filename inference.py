@@ -128,11 +128,21 @@ class StrategyTracker:
 
     def __init__(self):
         self.investigation_count = 0
-        self.confidence = 0.0
+        self.confidence = 0.5
         self.phase = "investigate"
         self.committed = False
         self.root_cause_locked = False
         self.last_confidence_source = "init"
+
+    @staticmethod
+    def _normalize_confidence(value):
+        try:
+            c = float(value)
+        except (TypeError, ValueError):
+            return 0.5
+        if 0.0 <= c <= 1.0:
+            return c
+        return 0.5
 
     @staticmethod
     def _is_investigation(action):
@@ -140,15 +150,7 @@ class StrategyTracker:
         return "investigate" in a or a.startswith("check_") or "diagnose" in a or "inspect" in a
 
     def ingest_llm_confidence(self, value, source="llm"):
-        if value is None:
-            return
-        try:
-            c = float(value)
-        except (TypeError, ValueError):
-            return
-        if c < 0.0 or c > 1.0:
-            return
-        self.confidence = c
+        self.confidence = self._normalize_confidence(value)
         self.last_confidence_source = source
 
     def record_step(self, action, reward, discovered_after):
@@ -542,6 +544,7 @@ def _run_episode_core(room):
     else:
         obs_msg = f"[ROOT CAUSE] Detected anomalies involving: {', '.join(root_cause_keywords)}"
         memory.root_cause_analysis = f"Anomalies involving: {', '.join(root_cause_keywords)}"
+        strategy.ingest_llm_confidence(None, source="observability_llm")
     room.observe_and_communicate("ObservabilityOps", obs_msg)
 
     rewards_list = []
@@ -576,8 +579,7 @@ def _run_episode_core(room):
         invalid_reason = decision.get("invalid_reason", "")
         llm_confidence_raw = decision.get("confidence")
 
-        if llm_decided:
-            strategy.ingest_llm_confidence(llm_confidence_raw, source="planner_llm")
+        strategy.ingest_llm_confidence(llm_confidence_raw, source="planner_llm")
 
         allow_revision = strategy.should_revise_plan(memory)
         planner.maybe_update(new_plan, allow_revision)
