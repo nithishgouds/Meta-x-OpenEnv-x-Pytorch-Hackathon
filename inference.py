@@ -8,12 +8,16 @@ from multi_agent import WarRoom, AGENT_NAMES, IC_NAME
 
 load_dotenv()
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
+API_BASE_URL = os.getenv("API_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
 HF_TOKEN = os.getenv("HF_TOKEN")
 MAX_STEPS = 15
 LLM_SEED = 42
 
+if API_BASE_URL is None:
+    raise ValueError("API_BASE_URL environment variable is required")
+if MODEL_NAME is None:
+    raise ValueError("MODEL_NAME environment variable is required")
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
