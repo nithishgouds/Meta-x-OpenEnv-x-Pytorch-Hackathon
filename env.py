@@ -30,8 +30,29 @@ except Exception:
 
 from models import Observation, Action, Reward, OpsSIMObservation, OpsSIMAction, OpsSIMState
 
+AGENT_DOMAIN_MAP = {
+    "AppOps": "app",
+    "InfraOps": "infra",
+    "DatabaseOps": "database",
+    "NetworkOps": "network",
+    "SecOps": "security",
+    "MiddlewareOps": "middleware",
+    "ObservabilityOps": "observability",
+}
 
-AGENT_DOMAIN_MAP = {"AppOps": "app", "InfraOps": "infra", "DatabaseOps": "database"}
+EXECUTION_AGENTS = list(AGENT_DOMAIN_MAP.keys())
+IC_NAME = "IncidentCommander"
+SUPERVISOR_NAME = "Supervisor"
+
+CRITICAL_TERMS = ["failing", "offline", "dead", "severed", "down", "failed", "timeout",
+                   "error", "critical", "crash_loop", "oom_killed", "corrupted", "compromised",
+                   "exhausted", "broken", "contention", "exposed", "route_leak"]
+MODERATE_TERMS = ["degraded", "overloaded", "stressed", "backed_up", "stalled", "pressure",
+                  "stale", "flapping", "at_risk", "unknown", "slow", "high", "dropping",
+                  "draining", "rerouting", "rotating", "partial"]
+POSITIVE_TERMS = ["online", "healthy", "stable", "normal", "active", "serving", "restored",
+                  "operational", "processing", "complete", "routing", "valid", "enforced",
+                  "closed", "flowing", "passing", "resolved", "recovered"]
 
 
 class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]):
@@ -50,6 +71,9 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
         self.step_count = 0
         self.incident_channel = []
         self.communication_count = 0
+        self.health_history = []
+        self.consecutive_do_nothing = 0
+        self.reward = None
 
         if DevOpsEnv._DATA_CACHE is None:
             dataset_path = os.path.join(DevOpsEnv._BASE_DIR, "tasks", "cascade.json")
@@ -61,6 +85,9 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
         self.last_action_error = None
         self.incident_channel = []
         self.communication_count = 0
+        self.health_history = []
+        self.consecutive_do_nothing = 0
+        self.reward = None
 
         if seed is not None:
             self.rng = random.Random(seed)
@@ -80,15 +107,26 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
             "sla_violation_penalty": scenario.get("sla_violation_penalty", -1.0),
             "domain_visibility": scenario.get("domain_visibility", {}),
             "action_domains": scenario.get("action_domains", {}),
+            "root_cause": scenario.get("root_cause", ""),
+            "root_cause_keywords": scenario.get("root_cause_keywords", []),
+            "conflict_pairs": scenario.get("conflict_pairs", []),
+            "severity_weights": scenario.get("severity_weights", []),
+            "local_bleed_rules": scenario.get("local_bleed_rules", {}),
             "history": [],
+            "action_outcomes": [],
         }
 
         available_actions = scenario.get("available_actions", [])
         if not available_actions:
             available_actions = list(self.state_data["optimal_solution_path"])
             available_actions.extend(list(self.state_data["penalties"].keys()))
-            available_actions.append("do_nothing")
-        available_actions = sorted(list(set(available_actions)))
+        available_actions = sorted(list(set(a for a in available_actions if a != "do_nothing")))
+
+        initial_health = self._compute_health_score(self.state_data["state"])
+        self.health_history.append(initial_health)
+
+        goal_state = self._compute_goal_state()
+        progress = self._compute_progress()
 
         self.observation = Observation(
             available_actions=available_actions,
@@ -97,6 +135,8 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
             logs=scenario.get("description", ""),
             step_count=self.step_count,
             incident_channel=[],
+            goal_state=goal_state,
+            progress=progress,
         )
         return self.observation
 
@@ -109,158 +149,339 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
 
         self.step_count += 1
         state = self.state_data["state"]
-        done = False
-
-        action_penalty = 0.0
-        if action_str not in self.observation.available_actions and action_str != "do_nothing":
-            action_penalty -= 0.2
-            self.last_action_error = f"invalid_action_{action_str}"
+        prev_state = json.loads(json.dumps(state))
+        agent = getattr(action, "agent", None)
 
         if action_str == "do_nothing":
-            action_penalty -= 0.3
+            self.consecutive_do_nothing += 1
+        else:
+            self.consecutive_do_nothing = 0
 
-        repeat_count = self.state_data["history"].count(action_str)
-        repeat_penalty = 0.0
-        if repeat_count > 0:
-            repeat_penalty = -0.15 * repeat_count
+        p_resp = self._calculate_responsibility_penalty(action_str, agent)
+        if p_resp > 0:
+            self.state_data["history"].append(action_str)
+            self.state_data["action_outcomes"].append({"action": action_str, "result": "responsibility_violation"})
+            self.last_action_error = f"responsibility_violation_{agent}_{action_str}"
+            total = -p_resp
+            self._update_observation(state, action_str, total)
+            self.reward = Reward(value=total, responsibility_penalty=-p_resp)
+            return self.observation, self.reward, True, {"reason": "responsibility_violation"}
 
+        self._apply_state_transition(state, action_str)
         self.state_data["history"].append(action_str)
 
-        if action_str in self.state_data["penalties"]:
-            penalty_val = float(self.state_data["penalties"][action_str])
-            action_penalty += penalty_val
+        delta_h = self._calculate_delta_health(state, prev_state)
+        b_sys = self._calculate_global_bleed(state)
+        b_loc = self._calculate_local_bleed(state)
+        lambda_val = 1.0 / max(self.max_steps, 1)
+        p_urg = lambda_val * self.step_count
 
-            if penalty_val <= -0.8:
-                bleed_loss = self._calculate_dynamic_bleed(state)
-                urgency_penalty = -0.05 * self.step_count
-                coordination_reward = self._calculate_coordination_reward(action)
-                communication_cost = self._calculate_communication_cost()
-                conflict_penalty = self._calculate_conflict_penalty(action_str)
-                step_reward = (
-                    bleed_loss + action_penalty + repeat_penalty + urgency_penalty
-                    + coordination_reward + communication_cost + conflict_penalty
-                    + self.state_data.get("sla_violation_penalty", -1.0)
-                )
-                self._update_observation(state, action_str, step_reward)
-                reward = Reward(
-                    value=step_reward, bleed=bleed_loss, action_penalty=action_penalty,
-                    repeat_penalty=repeat_penalty, urgency_penalty=urgency_penalty,
-                    communication_cost=communication_cost,
-                    coordination_reward=coordination_reward,
-                    conflict_penalty=conflict_penalty,
-                )
-                return self.observation, reward, True, {"reason": "guardrail_violation"}
+        q_act = self._calculate_action_quality(action_str, state, prev_state)
+        r_seq = self._calculate_sequencing_reward(action_str)
+        p_conf = self._calculate_conflict_penalty(action_str)
 
-        prev_state = json.loads(json.dumps(state))
-        self._apply_state_transition(state, action_str)
-
-        if json.dumps(prev_state, sort_keys=True) == json.dumps(state, sort_keys=True):
-            action_penalty -= 0.2
-
-        progress_reward = 0.0
-        improvement_level = self._detect_positive_progress(prev_state, state)
-        if improvement_level == "critical":
-            progress_reward += 0.3
-        elif improvement_level == "moderate":
-            progress_reward += 0.1
-        elif improvement_level == "minor":
-            progress_reward += 0.05
-
-        if self._detect_sla_improvement(prev_state, state):
-            progress_reward += 0.2
-
-        bleed_loss = self._calculate_dynamic_bleed(state)
-        urgency_penalty = -0.05 * self.step_count
-        coordination_reward = self._calculate_coordination_reward(action)
-        conflict_penalty = self._calculate_conflict_penalty(action_str)
-        communication_cost = self._calculate_communication_cost()
-        success_reward = 0.0
+        r_coord = self._calculate_coordination_reward(action)
+        r_obs = self._calculate_observability_reward()
+        r_sup = self._calculate_supervisor_reward(action)
+        gamma_val = 1.0 / max(self.max_steps, 1)
+        p_comm = gamma_val * self.communication_count
 
         sla_status = self._check_sla_compliance(state)
+        r_succ = 0.0
+        done = False
 
         if sla_status == "FAIL":
-            step_reward = (
-                bleed_loss + action_penalty + repeat_penalty + urgency_penalty
-                + progress_reward + coordination_reward + conflict_penalty
-                + communication_cost + self.state_data.get("sla_violation_penalty", -1.0)
-            )
-            self._update_observation(state, action_str, step_reward)
-            reward = Reward(
-                value=step_reward, bleed=bleed_loss, action_penalty=action_penalty,
-                repeat_penalty=repeat_penalty, urgency_penalty=urgency_penalty,
-                progress_reward=progress_reward, communication_cost=communication_cost,
-                coordination_reward=coordination_reward, conflict_penalty=conflict_penalty,
-            )
-            return self.observation, reward, True, {"reason": "sla_violation"}
-
-        if sla_status == "PASS":
-            success_reward = 1.0
+            r_succ = float(self.state_data.get("sla_violation_penalty", -2.0))
+            done = True
+        elif sla_status == "PASS":
+            r_succ = 2.0
             done = True
 
-        if self.step_count >= self.max_steps:
+        if self.step_count >= self.max_steps and not done:
             done = True
 
-        step_reward = (
-            bleed_loss + action_penalty + repeat_penalty + urgency_penalty
-            + progress_reward + success_reward + coordination_reward
-            + conflict_penalty + communication_cost
+        stagnation = self._check_stagnation()
+
+        total = (
+            delta_h
+            - (b_sys + b_loc)
+            - p_urg
+            + q_act
+            + r_seq
+            - p_resp
+            - p_conf
+            + r_coord
+            + r_obs
+            + r_sup
+            - p_comm
+            + r_succ
+            + stagnation
         )
 
-        self._update_observation(state, action_str, step_reward)
-        reward = Reward(
-            value=step_reward, bleed=bleed_loss, action_penalty=action_penalty,
-            repeat_penalty=repeat_penalty, urgency_penalty=urgency_penalty,
-            progress_reward=progress_reward + success_reward,
-            communication_cost=communication_cost,
-            coordination_reward=coordination_reward, conflict_penalty=conflict_penalty,
+        outcome = "success" if r_succ > 0 else ("fail" if done else "step")
+        self.state_data["action_outcomes"].append({"action": action_str, "result": outcome, "reward": total})
+
+        self._update_observation(state, action_str, total)
+
+        self.reward = Reward(
+            value=total,
+            delta_health=delta_h,
+            global_bleed=-b_sys,
+            local_bleed=-b_loc,
+            urgency_penalty=-p_urg,
+            action_quality=q_act,
+            sequencing_reward=r_seq,
+            responsibility_penalty=-p_resp,
+            conflict_penalty=-p_conf,
+            coordination_reward=r_coord,
+            observability_reward=r_obs,
+            supervisor_reward=r_sup,
+            communication_cost=-p_comm,
+            success_reward=r_succ,
         )
-        return self.observation, reward, done, {}
+        return self.observation, self.reward, done, {"sla_status": sla_status}
 
     def _handle_communication(self, action):
         self.communication_count += 1
         message = getattr(action, "message", "") or ""
         agent = getattr(action, "agent", "unknown") or "unknown"
         self.incident_channel.append({"from": agent, "message": message})
-        communication_cost = -0.02
+        cost = -0.02
         self.observation.incident_channel = list(self.incident_channel)
         self.observation.step_count = self.step_count
-        reward = Reward(value=communication_cost, communication_cost=communication_cost)
-        return self.observation, reward, False, {"type": "communication"}
+        self.reward = Reward(value=cost, communication_cost=cost)
+        return self.observation, self.reward, False, {"type": "communication"}
 
-    def _calculate_coordination_reward(self, action):
-        agent = getattr(action, "agent", None)
-        if not agent:
+    def _compute_health_score(self, state):
+        score = 0.0
+        flat = self._flatten_state(state)
+        for _, val in flat.items():
+            if not isinstance(val, str):
+                continue
+            vl = val.lower()
+            if any(t in vl for t in CRITICAL_TERMS):
+                score -= 0.3
+            elif any(t in vl for t in MODERATE_TERMS):
+                score -= 0.1
+            elif any(t in vl for t in POSITIVE_TERMS):
+                score += 0.1
+        return score
+
+    def _calculate_delta_health(self, state, prev_state):
+        curr = self._compute_health_score(state)
+        prev = self._compute_health_score(prev_state)
+        self.health_history.append(curr)
+        return curr - prev
+
+    def _calculate_global_bleed(self, state):
+        severity_weights = self.state_data.get("severity_weights", [])
+        if severity_weights:
+            total = 0.0
+            for sw in severity_weights:
+                if self.evaluate_condition(state, sw.get("condition", "")):
+                    total += float(sw.get("weight", 0.0))
+            return total
+        bleed = 0.0
+        for rule in self.state_data.get("bleed_rules", []):
+            if self.evaluate_condition(state, rule.get("condition", "")):
+                bleed += abs(float(rule.get("penalty", 0.0)))
+        return bleed
+
+    def _calculate_local_bleed(self, state):
+        total = 0.0
+        local_rules = self.state_data.get("local_bleed_rules", {})
+        for domain, rules in local_rules.items():
+            for rule in rules:
+                if self.evaluate_condition(state, rule.get("condition", "")):
+                    total += abs(float(rule.get("penalty", 0.0)))
+        return total
+
+    def _calculate_action_quality(self, action_str, state, prev_state):
+        if action_str == "do_nothing":
+            return -0.3 * (self.consecutive_do_nothing ** 1.5)
+
+        if action_str not in (self.observation.available_actions or []):
+            self.last_action_error = f"invalid_action_{action_str}"
+            return -0.5
+
+        penalties = self.state_data.get("penalties", {})
+        if action_str in penalties:
+            pval = float(penalties[action_str])
+            if pval <= -0.5:
+                return pval
+
+        tr = self.state_data.get("transition_rules", {}).get(action_str, {})
+        if "reward" in tr:
+            cond = tr.get("condition", "")
+            if self.evaluate_condition(prev_state, cond):
+                return float(tr.get("reward", 0.0))
+            else:
+                return float(tr.get("else_reward", -0.1))
+
+        if json.dumps(prev_state, sort_keys=True) == json.dumps(state, sort_keys=True):
+            return -0.2
+
+        optimal = self.state_data.get("optimal_solution_path", [])
+        if action_str in optimal:
+            return 0.15
+
+        return 0.0
+
+    def _calculate_sequencing_reward(self, action_str):
+        optimal = self.state_data.get("optimal_solution_path", [])
+        if action_str not in optimal:
             return 0.0
+
+        history = self.state_data.get("history", [])
+        action_idx = optimal.index(action_str)
+
+        prerequisites_met = 0
+        prerequisites_total = action_idx
+        for i in range(action_idx):
+            if optimal[i] in history:
+                prerequisites_met += 1
+
+        if prerequisites_total == 0:
+            return 0.15
+
+        ratio = prerequisites_met / prerequisites_total
+        if ratio >= 1.0:
+            return 0.15
+        elif ratio >= 0.5:
+            return 0.05
+        else:
+            return -0.15
+
+    def _calculate_responsibility_penalty(self, action_str, agent):
+        if agent is None or agent in (IC_NAME, SUPERVISOR_NAME):
+            return 0.0
+        if action_str in ("do_nothing", "communicate"):
+            return 0.0
+
         action_domains = self.state_data.get("action_domains", {})
         agent_domain = AGENT_DOMAIN_MAP.get(agent, "")
         domain_actions = action_domains.get(agent_domain, [])
-        if action.action_type in domain_actions:
-            return 0.1
-        elif domain_actions:
-            return -0.1
+
+        if action_str in domain_actions:
+            return 0.0
+
+        for domain, actions in action_domains.items():
+            if action_str in actions and domain != agent_domain:
+                return 5.0
+
         return 0.0
 
     def _calculate_conflict_penalty(self, action_str):
-        history = self.state_data["history"]
+        history = self.state_data.get("history", [])
         if len(history) < 2:
             return 0.0
-        prev = history[-2]
-        if prev == action_str and action_str != "do_nothing":
-            return -0.05
+
+        prev_action = history[-2]
+        conflict_pairs = self.state_data.get("conflict_pairs", [])
+
+        for pair in conflict_pairs:
+            if action_str in pair and prev_action in pair and action_str != prev_action:
+                return 0.3
+
+        if prev_action == action_str and action_str != "do_nothing":
+            return 0.1
+
         return 0.0
 
-    def _calculate_communication_cost(self):
-        if self.communication_count > 0:
-            return -0.01 * self.communication_count
+    def _calculate_coordination_reward(self, action):
+        if not getattr(action, "ic_directive", False):
+            return 0.0
+
+        target = getattr(action, "target_agent", None)
+        action_str = action.action_type
+
+        if not target or target not in EXECUTION_AGENTS:
+            return -0.1
+
+        action_domains = self.state_data.get("action_domains", {})
+        target_domain = AGENT_DOMAIN_MAP.get(target, "")
+        domain_actions = action_domains.get(target_domain, [])
+
+        if action_str in domain_actions:
+            return 0.15
+        return -0.1
+
+    def _calculate_observability_reward(self):
+        root_cause_keywords = self.state_data.get("root_cause_keywords", [])
+        if not root_cause_keywords:
+            return 0.0
+
+        obs_messages = [m for m in self.incident_channel if m.get("from") == "ObservabilityOps"]
+        if not obs_messages:
+            return 0.0
+
+        best_score = 0.0
+        for msg in obs_messages:
+            text = msg.get("message", "").lower()
+            matches = sum(1 for kw in root_cause_keywords if kw.lower() in text)
+            if matches > best_score:
+                best_score = matches
+
+        if best_score >= 3:
+            return 0.3
+        elif best_score >= 2:
+            return 0.2
+        elif best_score >= 1:
+            return 0.1
+        return -0.05
+
+    def _calculate_supervisor_reward(self, action):
+        supervisor_approved = getattr(action, "supervisor_approved", None)
+        if supervisor_approved is None:
+            return 0.0
+
+        action_str = action.action_type
+        penalties = self.state_data.get("penalties", {})
+        is_harmful = action_str in penalties and float(penalties.get(action_str, 0)) <= -0.3
+
+        if not supervisor_approved and is_harmful:
+            return 0.2
+        elif supervisor_approved and is_harmful:
+            return -0.2
+        elif not supervisor_approved and not is_harmful:
+            return -0.1
         return 0.0
+
+    def _check_stagnation(self):
+        n = 3
+        if len(self.health_history) < n + 1:
+            return 0.0
+        recent = self.health_history[-(n + 1):]
+        if all(h <= recent[0] + 0.01 for h in recent[1:]):
+            streak = len(self.health_history) - n
+            return -0.05 * min(streak, 5)
+        return 0.0
+
+    def _compute_goal_state(self):
+        goals = {}
+        required = self.state_data.get("sla_rules", {}).get("required", [])
+        state = self.state_data.get("state", {})
+        for cond in required:
+            goals[cond] = self.evaluate_condition(state, cond)
+        return goals
+
+    def _compute_progress(self):
+        required = self.state_data.get("sla_rules", {}).get("required", [])
+        if not required:
+            return 0.0
+        state = self.state_data.get("state", {})
+        met = sum(1 for c in required if self.evaluate_condition(state, c))
+        return met / len(required)
 
     def _update_observation(self, state, action_str, step_reward):
         self.observation.system_state = state
         self.observation.step_count = self.step_count
         self.observation.incident_channel = list(self.incident_channel)
+        self.observation.goal_state = self._compute_goal_state()
+        self.observation.progress = self._compute_progress()
         if self.observation.logs is None:
             self.observation.logs = ""
-        self.observation.logs += f"\nStep {self.step_count}: {action_str} -> Reward: {step_reward:.2f}"
+        self.observation.logs += f"\nStep {self.step_count}: {action_str} -> Reward: {step_reward:.3f}"
 
     def _apply_state_transition(self, state, action_str):
         rules = self.state_data.get("transition_rules", {})
@@ -271,85 +492,6 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
                 self.apply_effects(state, rule.get("effects", {}))
             elif "else_effects" in rule:
                 self.apply_effects(state, rule["else_effects"])
-
-    def _calculate_dynamic_bleed(self, state):
-        bleed = 0.0
-        for rule in self.state_data.get("bleed_rules", []):
-            if self.evaluate_condition(state, rule.get("condition", "")):
-                bleed += float(rule.get("penalty", 0.0))
-        return bleed
-
-    def _detect_sla_improvement(self, prev_state, new_state):
-        required_rules = self.state_data.get("sla_rules", {}).get("required", [])
-        if not required_rules:
-            return False
-        prev_passed = sum(1 for c in required_rules if self.evaluate_condition(prev_state, c))
-        new_passed = sum(1 for c in required_rules if self.evaluate_condition(new_state, c))
-        return new_passed > prev_passed
-
-    def _detect_positive_progress(self, prev_state, new_state):
-        def extract_values(d, prefix=""):
-            vals = {}
-            for k, v in d.items():
-                full_key = f"{prefix}.{k}" if prefix else k
-                if isinstance(v, dict):
-                    vals.update(extract_values(v, full_key))
-                else:
-                    vals[full_key] = v
-            return vals
-
-        prev_vals = extract_values(prev_state)
-        new_vals = extract_values(new_state)
-
-        critical_terms = ["failing", "offline", "dead", "severed", "down", "failed", "timeout"]
-        moderate_terms = ["degraded", "overloaded", "maxed", "dropped", "stalled", "pressure", "stressed"]
-        positive_terms = ["online", "healthy", "stable", "complete", "normal", "routed", "restored", "passing", "active", "serving"]
-
-        improvement = "none"
-
-        for key, new_val in new_vals.items():
-            prev_val = prev_vals.get(key)
-            if prev_val == new_val or prev_val is None:
-                continue
-
-            prev_num = self._parse_num(prev_val)
-            new_num = self._parse_num(new_val)
-
-            if prev_num is not None and new_num is not None:
-                if new_num < prev_num:
-                    improvement = "moderate"
-
-            if isinstance(prev_val, str) and isinstance(new_val, str):
-                prev_str = prev_val.lower()
-                new_str = new_val.lower()
-
-                was_critical = any(t in prev_str for t in critical_terms)
-                was_moderate = any(t in prev_str for t in moderate_terms)
-                is_good_now = any(t in new_str for t in positive_terms)
-
-                if was_critical and is_good_now:
-                    return "critical"
-                elif was_critical and not any(t in new_str for t in critical_terms):
-                    return "critical"
-                elif was_moderate and is_good_now:
-                    if improvement != "critical":
-                        improvement = "moderate"
-                elif is_good_now and not was_critical and not was_moderate:
-                    if improvement == "none":
-                        improvement = "minor"
-
-        return improvement
-
-    @staticmethod
-    def _parse_num(v):
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            try:
-                return float(v.replace("%", "").replace("$", "").replace(",", "").replace("ms", "").strip())
-            except ValueError:
-                return None
-        return None
 
     def _check_sla_compliance(self, state):
         sla_rules = self.state_data.get("sla_rules", {})
@@ -365,6 +507,16 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
                 return "PASS"
 
         return "INCOMPLETE"
+
+    def _flatten_state(self, d, prefix=""):
+        vals = {}
+        for k, v in d.items():
+            full_key = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, dict):
+                vals.update(self._flatten_state(v, full_key))
+            else:
+                vals[full_key] = v
+        return vals
 
     def evaluate_condition(self, state, condition_string):
         if not condition_string:
@@ -472,14 +624,19 @@ class DevOpsEnv(OpenEnvEnvironment[OpsSIMAction, OpsSIMObservation, OpsSIMState]
                 domain_state[k] = state[k]
         action_domains = self.state_data.get("action_domains", {})
         agent_actions = action_domains.get(domain, [])
+
+        filtered_actions = [a for a in agent_actions if a != "do_nothing"]
+
         return Observation(
-            available_actions=agent_actions + (["do_nothing"] if agent_actions else []),
+            available_actions=filtered_actions if filtered_actions else [],
             domain_state=domain_state,
             playbook_text=self.observation.playbook_text if self.step_count == 0 else None,
             logs=self.observation.logs,
             step_count=self.step_count,
             agent=agent_name,
             incident_channel=list(self.incident_channel),
+            goal_state=self._compute_goal_state(),
+            progress=self._compute_progress(),
         )
 
     @property

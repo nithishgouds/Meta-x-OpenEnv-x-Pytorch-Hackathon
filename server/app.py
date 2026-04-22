@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import os
-from env import DevOpsEnv
+from env import DevOpsEnv, EXECUTION_AGENTS, IC_NAME, SUPERVISOR_NAME
 from models import Action
 from multi_agent import WarRoom
 
@@ -13,7 +13,8 @@ war_room = WarRoom(seed=42, max_steps=15)
 
 class DirectiveRequest(BaseModel):
     target_agent: str = "AppOps"
-    action: str = "do_nothing"
+    action: str = "analyze_metrics"
+    supervisor_approved: bool = True
 
 
 class CommunicateRequest(BaseModel):
@@ -55,13 +56,14 @@ def communicate(req: CommunicateRequest):
 @app.post("/step")
 def step_env(directive: DirectiveRequest):
     try:
-        result = war_room.execute_directive(directive.target_agent, directive.action)
+        result = war_room.execute_directive(directive.target_agent, directive.action, directive.supervisor_approved)
         return {
             "observation": result["observation"].model_dump(),
-            "reward": result["reward"].value,
+            "reward": result["reward"].model_dump(),
             "done": result["done"],
             "info": result["info"],
             "incident_channel": result["incident_channel"],
+            "progress": war_room.get_progress(),
             "last_action_error": war_room.env.last_action_error,
         }
     except Exception as e:
@@ -76,6 +78,15 @@ def get_state():
 @app.get("/incident_channel")
 def get_channel():
     return {"incident_channel": war_room.get_incident_channel()}
+
+
+@app.get("/progress")
+def get_progress():
+    return {
+        "progress": war_room.get_progress(),
+        "goal_state": war_room.get_goal_state(),
+        "agents": EXECUTION_AGENTS,
+    }
 
 
 def main():

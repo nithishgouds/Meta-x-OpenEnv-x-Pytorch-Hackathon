@@ -10,182 +10,142 @@ tags:
   - openenv
 ---
 
-# OpsSim-AI: Distributed War Room (Multi-Agent Cascading Failure System)
-
-*When systems cascade-fail, no single operator sees the full picture.*
+# OpsSim-AI: Distributed War Room (9-Agent Cascading Failure System)
 
 ## Overview
 
-OpsSim-AI is an OpenEnv-compatible multi-agent environment that simulates cascading production failures resolved through a distributed war room. A team of four specialized agents must coordinate under partial observability to diagnose and recover interconnected services before SLA violations escalate.
+OpsSim-AI is an OpenEnv-compatible 9-agent environment simulating cascading production failures resolved through a distributed war room with partial observability, strict responsibility enforcement, and a mathematically rigorous reward function.
 
-### Why Multi-Agent?
+## Architecture: 9 Agents
 
-Real incidents are never handled by one person. Production war rooms involve:
-- **Domain specialists** who each see only their own systems
-- **An Incident Commander** who reads reports and issues directives
-- **Shared communication** through an incident channel
-- **Coordination overhead** — every message costs time, every wrong directive bleeds revenue
+### Execution Layer (7 agents)
 
-OpsSim-AI captures this structure exactly.
+| Agent | Domain | Responsibility |
+|-------|--------|---------------|
+| **AppOps** | app | Application metrics, checkout, payment, latency |
+| **InfraOps** | infra | Infrastructure, caching, pod health, compute |
+| **DatabaseOps** | database | DB pools, replication, queries, locks |
+| **NetworkOps** | network | Connectivity, load balancers, DNS, BGP routes |
+| **SecOps** | security | Auth, certificates, firewall, access controls |
+| **MiddlewareOps** | middleware | API gateway, message queues, service mesh, circuit breakers |
+| **ObservabilityOps** | observability | Monitoring, alerts, log pipelines, metrics collection |
 
-## Architecture
+### Coordination Layer
 
-### Four Agents
+| Agent | Role |
+|-------|------|
+| **Incident Commander (IC)** | Reads all reports, issues directives, plans multi-step resolution |
 
-| Agent | Role | Visibility |
-|-------|------|-----------|
-| **IncidentCommander** | Reads all reports, issues directives | Incident channel + playbook |
-| **AppOps** | Application layer specialist | App metrics (checkout, payment, latency) |
-| **InfraOps** | Infrastructure specialist | Infra metrics (redis, DNS, network, load balancers) |
-| **DatabaseOps** | Database specialist | DB metrics (pools, replication, locks, queries) |
+### Oversight Layer
 
-### Decision Flow
+| Agent | Role |
+|-------|------|
+| **Supervisor (Fleet AI)** | Evaluates IC directives, vetoes catastrophic actions |
+
+## Execution Flow (Strict 8-Phase)
 
 ```
-1. Each domain agent OBSERVES its partial view of the system
-2. Each domain agent COMMUNICATES findings to the incident channel
-3. The Incident Commander READS all reports
-4. The IC issues a DIRECTIVE: which agent should execute which action
-5. The targeted agent EXECUTES the action
-6. The environment updates state and calculates reward
-7. Repeat until SLA is met, violated, or max steps reached
+1. ObservabilityOps analyzes metrics and surfaces root cause
+2. Execution agents observe their domain and report to incident channel
+3. IC reads all reports from incident channel
+4. IC issues directive (target_agent + action)
+5. Supervisor evaluates directive — approves or vetoes
+6. Target agent executes action
+7. Environment updates state
+8. Reward is computed (13 components)
 ```
 
-### Partial Observability
+## Reward Function (13 Components)
 
-Each domain agent only sees state fields relevant to its domain. For example, in a checkout meltdown scenario:
-- **AppOps** sees: `checkout_status`, `payment_service`, `phase`
-- **InfraOps** sees: `redis_cache`, `dns_resolution`
-- **DatabaseOps** sees: `database_pool`
+The total reward at step t follows the formal equation:
 
-No single agent can solve the incident alone. The IC must synthesize partial reports to make correct decisions.
+$$R_t = \Delta H(s_t, s_{t-1}) - \left(B_{sys}(s_t) + \sum_{d \in D} B_{loc}(s_t, d)\right) - \lambda \cdot t$$
+$$+ Q_{act}(a_t) + R_{seq}(a_t, h_t) - P_{resp}(a_t, e) - P_{conf}(a_t, a_{t-1})$$
+$$+ R_{coord}(IC_t, a_t) + R_{obs}(m_{obs}, s_t) + R_{sup}(IC_t) - \gamma \cdot \Sigma(m_t)$$
+$$+ \mathbb{1}_{SLA\_Met} \cdot R_{succ}$$
 
-## Task: Cascade Scenarios
+### Pillar I: System Health & Degradation
 
-All scenarios are cascading failures (`tasks/cascade.json`). Each scenario includes:
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Global System Health | ΔH | Positive delta when SLA metrics improve |
+| Dynamic Global Bleed | B_sys | Sum of active incident severity weights (not hardcoded) |
+| Local Domain Bleed | B_loc | Per-domain degradation penalties |
+| Urgency Penalty | P_urg | Linear time-decay: λ·t where λ = 1/max_steps |
 
-- **initial_state**: The system state when the incident begins
-- **playbook_text**: Operational runbook the IC should follow
-- **available_actions**: All possible actions across all domains
-- **penalties**: Actions that cause harm (guardrail violations)
-- **optimal_solution_path**: The correct sequence of actions
-- **transition_rules**: How actions change system state (with conditions)
-- **bleed_rules**: Ongoing damage while the system stays broken
-- **sla_rules**: Required conditions for resolution + forbidden states
-- **domain_visibility**: Which state fields each domain can see
-- **action_domains**: Which actions each domain agent can execute
+### Pillar II: Action & Sequencing Execution
 
-### 10 Scenarios
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Action Quality | Q_act | Rewards valid actions, penalizes invalid/redundant/do_nothing |
+| Sequencing Reward | R_seq | Rewards topologically correct execution order |
+| Responsibility Penalty | P_resp | Massive penalty (-5.0) if agent acts outside its domain |
+| Conflict Penalty | P_conf | Penalizes mutually exclusive or repeated consecutive actions |
 
-1. **cascade_001** — Checkout Meltdown (payment → cache → DB cascade)
-2. **cascade_002** — Deploy Gone Wrong (bad deploy → rollback → DNS)
-3. **cascade_003** — Network Partition (cross-region connectivity failure)
-4. **cascade_004** — Storage Corruption Chain (disk → replication → data loss)
-5. **cascade_005** — Auth Breach Chain (credential leak → lockdown → recovery)
-6. **cascade_006** — Network Outage Cascade (BGP → CDN → routing failure)
-7. **cascade_007** — Database Overload Chain (query storm → pool exhaustion)
-8. **cascade_008** — App Crash Cascade (OOM → restart loops → dependency failures)
-9. **cascade_009** — Multi-Region Failover (primary region failure → failover)
-10. **cascade_010** — DB Lock Revenue Cascade (lock contention → transaction failures)
+### Pillar III: Coordination & Communication
 
-## Reward System
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Coordination Reward | R_coord | IC correctly delegates to right domain agent |
+| Observability Contribution | R_obs | ObservabilityOps surfaces correct root cause keywords |
+| Supervisor Effect | R_sup | Correct veto of harmful actions / penalty for rubber-stamping |
+| Communication Cost | P_comm | γ·Σ(messages) prevents LLM chatter loops |
 
-Every action produces a composite reward:
+### Pillar IV: Terminal
 
-| Component | Description |
-|-----------|-------------|
-| **Bleed** | Ongoing damage from unresolved failures (dynamic per state) |
-| **Action Penalty** | Cost of harmful, invalid, or do-nothing actions |
-| **Repeat Penalty** | -0.15 × repeat count for repeated actions |
-| **Urgency Penalty** | -0.05 × step number (time pressure) |
-| **Progress Reward** | +0.05 to +0.3 for state improvements |
-| **Coordination Reward** | +0.1 if agent acts in own domain, -0.1 if not |
-| **Conflict Penalty** | -0.05 if same action as previous step |
-| **Communication Cost** | -0.01 × total messages (coordination overhead) |
-| **SLA Success** | +1.0 for meeting all required SLA conditions |
-| **SLA Violation** | Large penalty (scenario-specific) for forbidden states |
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Success Reward | R_succ | +2.0 when all SLA conditions met |
 
-### Normalization
+## do_nothing Prevention
 
-Scores are normalized to [0, 1] using dynamic min/max reward bounds calculated from each scenario's bleed rules, penalties, and SLA configuration.
+1. **Action Filtering**: do_nothing removed from available actions when valid actions exist
+2. **Escalating Penalty**: -0.3 × (consecutive_count)^1.5
+3. **Stagnation Detection**: Extra penalty when no health improvement for 3+ steps
+
+## Long-Horizon Planning
+
+- **Goal Decomposition**: IC receives unmet SLA goals and must plan multi-step resolution
+- **Progress Tracking**: Real-time % of SLA conditions met, injected into all prompts
+- **Dependency Awareness**: Action domains + sequencing reward enforce causal ordering
+- **Persistent Memory**: Full action history with outcomes tracked across episode
+- **Recovery**: Supervisor can veto and suggest alternatives when stuck
 
 ## Project Structure
 
 ```
-├── env.py              # DevOpsEnv — OpenEnv-compatible environment
-├── models.py           # Pydantic models (Action, Observation, Reward, State)
-├── multi_agent.py      # WarRoom orchestrator + DomainAgent + IncidentCommander
-├── inference.py        # LLM-based multi-agent inference loop + grading
+├── env.py              # DevOpsEnv — 13-component reward, 7 domains, OpenEnv-compatible
+├── models.py           # Pydantic models (Action, Observation, Reward with 13 fields, State)
+├── multi_agent.py      # WarRoom + 9 agents (7 execution + IC + Supervisor)
+├── inference.py        # LLM loop: 8-phase execution with Supervisor veto
 ├── train.py            # GRPO training with TRL (tool-calling, LoRA)
-├── server/
-│   └── app.py          # FastAPI server for HF Space deployment
-├── tasks/
-│   └── cascade.json    # 10 cascading failure scenarios
-├── eval_results/
-│   └── results.json    # Evaluation output
+├── server/app.py       # FastAPI server for HF Space
+├── tasks/cascade.json  # 10 scenarios × 7 domains
 ├── openenv.yaml        # OpenEnv manifest
-├── pyproject.toml      # Package configuration
-├── Dockerfile          # Container for HF Space
-├── requirements.txt    # Dependencies
-└── README.md
+├── Dockerfile          # Container
+└── requirements.txt    # Dependencies
 ```
 
 ## Usage
 
-### Inference (LLM-based)
+### Inference
 
 ```bash
-export HF_TOKEN=your_token_here
+export HF_TOKEN=your_token
 python inference.py
 ```
 
-Runs all scenarios with the configured LLM. Each episode:
-1. Resets the war room
-2. Domain agents observe and communicate
-3. IC reads reports and issues directives
-4. Actions execute until resolution or timeout
-
-### Training (GRPO)
+### Training
 
 ```bash
 python train.py --model Qwen/Qwen3-0.6B --output_dir ./opssim-grpo-output
 ```
-
-Uses TRL's GRPOTrainer with tool-calling:
-- The model plays as Incident Commander
-- Tools: `observe_domain`, `communicate`, `execute_directive`
-- LoRA (r=16, alpha=32) for memory efficiency
-- Compatible with 2 vCPU / 8 GB RAM
 
 ### Server
 
 ```bash
 python server/app.py
 ```
-
-Endpoints:
-- `POST /reset` — Start new incident
-- `POST /communicate` — Post to incident channel
-- `POST /step` — Execute IC directive
-- `GET /state` — Current system state
-- `GET /incident_channel` — All messages
-- `GET /health` — Health check
-
-### Docker
-
-```bash
-docker build -t opssim-ai .
-docker run -p 7860:7860 opssim-ai
-```
-
-## Design Principles
-
-- **Deterministic**: temperature=0, fixed seed=42, no uncontrolled randomness
-- **OpenEnv-compliant**: Extends OpenEnv Action, Observation, State base types
-- **Resource-efficient**: Runs within 2 vCPU / 8 GB RAM constraints
-- **Cascade-only**: No easy/medium/hard tiers — every scenario is a multi-service cascading failure
-- **Partial observability**: Domain agents see only their slice of state
-- **Communication has cost**: Every message to the incident channel costs -0.02 reward
 
 ## Authors
 

@@ -10,16 +10,20 @@ from trl import GRPOConfig, GRPOTrainer
 class MultiAgentTrainingEnv:
     def __init__(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from env import DevOpsEnv
-        from multi_agent import WarRoom, AGENT_NAMES
+        from env import DevOpsEnv, EXECUTION_AGENTS, AGENT_DOMAIN_MAP, IC_NAME, SUPERVISOR_NAME
+        from multi_agent import WarRoom
 
         self.room = WarRoom(seed=42, max_steps=15)
         self.reward = 0.0
         self.done = False
         self._available_actions = []
-        self._agent_names = AGENT_NAMES
+        self._agent_names = EXECUTION_AGENTS
+        self._agent_domain_map = AGENT_DOMAIN_MAP
         self._domain_observations = {}
         self._playbook_text = ""
+        self._action_domains = {}
+        self._root_cause_keywords = []
+        self._penalties = {}
 
     def reset(self, prompt=None, **kwargs):
         obs, domain_obs = self.room.reset()
@@ -28,34 +32,37 @@ class MultiAgentTrainingEnv:
         self._available_actions = obs.available_actions or []
         self._domain_observations = domain_obs
         self._playbook_text = obs.playbook_text or ""
+        self._action_domains = self.room.env.state_data.get("action_domains", {})
+        self._root_cause_keywords = self.room.env.state_data.get("root_cause_keywords", [])
+        self._penalties = self.room.env.state_data.get("penalties", {})
+
+        goal_state = self.room.get_goal_state()
+        unmet = [g for g, met in goal_state.items() if not met]
 
         parts = [
             f"INCIDENT: {obs.logs or 'Unknown incident'}",
             f"\nPlaybook:\n{self._playbook_text}",
             f"\nSystem State:\n{json.dumps(obs.system_state, indent=2, default=str)}",
             f"\nAvailable Actions: {', '.join(self._available_actions)}",
-            "\nYou are the Incident Commander in a war room with AppOps, InfraOps, DatabaseOps.",
-            "Use observe_domain to check each domain agent's view.",
-            "Use communicate to post messages to the incident channel.",
-            "Use execute_directive to issue an action to a specific agent.",
-            "Follow the playbook. Investigate before acting.",
+            f"\nUnmet SLA Goals:\n" + "\n".join(f"  - {g}" for g in unmet),
+            f"\nRoot Cause Keywords: {', '.join(self._root_cause_keywords)}",
+            "\nYou are the Incident Commander in a war room with 7 domain agents:",
+            "  AppOps, InfraOps, DatabaseOps, NetworkOps, SecOps, MiddlewareOps, ObservabilityOps",
+            "Plus a Supervisor (Fleet AI) who approves or vetoes your directives.",
+            "\nTools available:",
+            "  observe_domain(agent_name) - Check a domain agent's view",
+            "  communicate(agent_name, message) - Post to incident channel",
+            "  execute_directive(target_agent, action) - Issue action to a domain agent",
+            "\nFollow the playbook. Investigate before acting. Fix root causes before symptoms.",
         ]
         return "\n".join(parts)
 
     def observe_domain(self, agent_name: str) -> str:
-        """
-        Get the domain-specific observation for a specialist agent.
-
-        Args:
-            agent_name: One of AppOps, InfraOps, or DatabaseOps.
-
-        Returns:
-            The domain agent's view of the system state and available actions.
-        """
+        """Get the domain-specific observation for a specialist agent."""
         if self.done:
             return "Incident resolved or episode ended."
         if agent_name not in self._agent_names:
-            return f"Unknown agent: {agent_name}. Use AppOps, InfraOps, or DatabaseOps."
+            return f"Unknown agent: {agent_name}. Use one of: {', '.join(self._agent_names)}"
         domain_obs = self._domain_observations.get(agent_name)
         if domain_obs is None:
             domain_obs = self.room.env.get_domain_observation(agent_name)
@@ -65,39 +72,27 @@ class MultiAgentTrainingEnv:
         else:
             parts.append("State: No domain-specific data visible.")
         parts.append(f"Actions: {json.dumps(domain_obs.available_actions)}")
+        if domain_obs.goal_state:
+            parts.append(f"Goal Progress: {domain_obs.progress:.0%}")
         return "\n".join(parts)
 
     def communicate(self, agent_name: str, message: str) -> str:
-        """
-        Post a message to the shared incident channel as a domain agent.
-
-        Args:
-            agent_name: The agent posting the message (AppOps, InfraOps, or DatabaseOps).
-            message: The observation or recommendation to share.
-
-        Returns:
-            Confirmation of the posted message.
-        """
+        """Post a message to the shared incident channel as a domain agent."""
         if self.done:
             return "Incident resolved or episode ended."
         self.room.observe_and_communicate(agent_name, message)
         return f"[{agent_name}] message posted to incident channel."
 
     def execute_directive(self, target_agent: str, action: str) -> str:
-        """
-        As Incident Commander, issue an action directive to a domain agent.
-
-        Args:
-            target_agent: Which agent should execute (AppOps, InfraOps, or DatabaseOps).
-            action: The action to execute from the available actions list.
-
-        Returns:
-            The result of executing the action including updated state and reward.
-        """
+        """As Incident Commander, issue an action directive to a domain agent."""
         if self.done:
             return "Incident resolved or episode ended."
 
-        result = self.room.execute_directive(target_agent, action)
+        supervisor_approved = True
+        if action in self._penalties and float(self._penalties.get(action, 0)) <= -0.3:
+            supervisor_approved = False
+
+        result = self.room.execute_directive(target_agent, action, supervisor_approved)
         self.reward = self.room.get_total_reward()
         self.done = result["done"]
 
@@ -111,6 +106,7 @@ class MultiAgentTrainingEnv:
             parts.append(f"State: {json.dumps(obs.system_state, indent=2, default=str)}")
         parts.append(f"Step Reward: {result['reward'].value:.3f}")
         parts.append(f"Total Reward: {self.reward:.3f}")
+        parts.append(f"Progress: {self.room.get_progress():.0%}")
         parts.append(f"Done: {self.done}")
         if not self.done:
             parts.append(f"\nAvailable Actions: {', '.join(self._available_actions)}")
@@ -134,14 +130,24 @@ def build_dataset():
         description = scenario.get("description", "")
         playbook = scenario.get("playbook_text", "")
         actions = scenario.get("available_actions", [])
+        root_cause_kw = scenario.get("root_cause_keywords", [])
+        action_domains = scenario.get("action_domains", {})
+
+        domain_text = ""
+        for domain, acts in action_domains.items():
+            domain_text += f"  {domain}: {', '.join(acts)}\n"
 
         parts = [
             f"DevOps Incident: {scenario_id}",
             f"\nDescription: {description}",
             f"\nPlaybook:\n{playbook}",
             f"\nAvailable Actions: {', '.join(actions)}",
+            f"\nActions by Domain:\n{domain_text}",
+            f"\nRoot Cause Keywords: {', '.join(root_cause_kw)}",
             "\nYou are the Incident Commander. Use tools to observe domains, "
             "communicate findings, and execute directives to resolve this incident.",
+            "You have 7 domain agents: AppOps, InfraOps, DatabaseOps, NetworkOps, SecOps, MiddlewareOps, ObservabilityOps.",
+            "A Supervisor reviews your directives for safety.",
         ]
 
         if "initial_state" in scenario:

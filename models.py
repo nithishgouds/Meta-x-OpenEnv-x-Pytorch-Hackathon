@@ -33,14 +33,19 @@ except Exception:
 
 class Reward(BaseModel):
     value: float
-    bleed: float = 0.0
-    action_penalty: float = 0.0
-    repeat_penalty: float = 0.0
+    delta_health: float = 0.0
+    global_bleed: float = 0.0
+    local_bleed: float = 0.0
     urgency_penalty: float = 0.0
-    progress_reward: float = 0.0
-    communication_cost: float = 0.0
-    coordination_reward: float = 0.0
+    action_quality: float = 0.0
+    sequencing_reward: float = 0.0
+    responsibility_penalty: float = 0.0
     conflict_penalty: float = 0.0
+    coordination_reward: float = 0.0
+    observability_reward: float = 0.0
+    supervisor_reward: float = 0.0
+    communication_cost: float = 0.0
+    success_reward: float = 0.0
 
 
 class OpsSIMObservation(OpenEnvObservation):
@@ -53,6 +58,8 @@ class OpsSIMObservation(OpenEnvObservation):
     agent: Optional[str] = None
     domain_state: Optional[Dict[str, Any]] = None
     incident_channel: Optional[List[Dict[str, Any]]] = None
+    goal_state: Optional[Dict[str, Any]] = None
+    progress: Optional[float] = None
 
 
 class OpsSIMAction(OpenEnvAction):
@@ -61,6 +68,8 @@ class OpsSIMAction(OpenEnvAction):
     agent: Optional[str] = Field(default=None, description="Agent taking the action")
     target_agent: Optional[str] = Field(default=None, description="Target agent for IC directive")
     message: Optional[str] = Field(default=None, description="Message for communicate action")
+    supervisor_approved: Optional[bool] = Field(default=None, description="Supervisor approval status")
+    ic_directive: Optional[bool] = Field(default=None, description="Whether this is an IC directive")
 
 
 class OpsSIMState(OpenEnvState):

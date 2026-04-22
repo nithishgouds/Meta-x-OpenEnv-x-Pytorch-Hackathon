@@ -1,6 +1,6 @@
 name: opssim_ai
-description: "OpsSim-AI: Distributed War Room — Multi-Agent Cascading Failure System"
-version: "1.0.0"
+description: "OpsSim-AI: 9-Agent Distributed War Room — Cascading Failure System"
+version: "2.0.0"
 authors:
   - Sandeep
   - Venkatesh
@@ -9,6 +9,8 @@ tags:
   - openenv
   - multi-agent
   - cascading-failure
+  - 9-agent
+  - partial-observability
 entry_point: env:DevOpsEnv
 
 tasks:
