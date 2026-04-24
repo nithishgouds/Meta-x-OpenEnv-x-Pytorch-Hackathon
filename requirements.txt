@@ -1,6 +1,6 @@
 pydantic
 huggingface_hub
-openenv-core @ git+https://github.com/meta-pytorch/OpenEnv.git
+openenv-core==0.2.3
 openai
 requests
 python-dotenv
