@@ -2,30 +2,21 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, ConfigDict, Field
 
 try:
-    import importlib.util as _ilu
-    import os as _os
-    _pkg = _os.path.dirname(
-        _ilu.find_spec("openenv").submodule_search_locations[0]  # type: ignore
-    )
-    _types_path = _os.path.join(_pkg, "openenv", "core", "env_server", "types.py")
-    _spec = _ilu.spec_from_file_location("_openenv_types", _types_path)
-    _mod = _ilu.module_from_spec(_spec)  # type: ignore
-    _spec.loader.exec_module(_mod)  # type: ignore
-    OpenEnvAction = _mod.Action
-    OpenEnvObservation = _mod.Observation
-    OpenEnvState = _mod.State
+    from openenv.core import Action as OpenEnvAction
+    from openenv.core import Observation as OpenEnvObservation
+    from openenv.core import State as OpenEnvState
 except Exception:
-    class OpenEnvAction(BaseModel):  # type: ignore[no-redef]
+    class OpenEnvAction(BaseModel):
         model_config = ConfigDict(extra="forbid", validate_assignment=True, arbitrary_types_allowed=True)
         metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    class OpenEnvObservation(BaseModel):  # type: ignore[no-redef]
+    class OpenEnvObservation(BaseModel):
         model_config = ConfigDict(extra="forbid", validate_assignment=True, arbitrary_types_allowed=True)
         done: bool = False
         reward: float | int | bool | None = None
         metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    class OpenEnvState(BaseModel):  # type: ignore[no-redef]
+    class OpenEnvState(BaseModel):
         model_config = ConfigDict(extra="forbid", validate_assignment=True, arbitrary_types_allowed=True)
         episode_id: Optional[str] = None
         step_count: int = 0

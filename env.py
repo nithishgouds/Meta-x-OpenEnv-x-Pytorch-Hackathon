@@ -4,28 +4,14 @@ import random
 import re
 
 try:
-    import importlib.util as _ilu
-    _pkg = os.path.dirname(
-        _ilu.find_spec("openenv").submodule_search_locations[0]  # type: ignore
-    )
-    _iface_path = os.path.join(_pkg, "openenv", "core", "env_server", "interfaces.py")
-    _types_path = os.path.join(_pkg, "openenv", "core", "env_server", "types.py")
-    _tspec = _ilu.spec_from_file_location("_oe_types", _types_path)
-    _tmod = _ilu.module_from_spec(_tspec)  # type: ignore
-    _tspec.loader.exec_module(_tmod)  # type: ignore
-    import sys
-    sys.modules["openenv.core.env_server.types"] = _tmod
-    _ispec = _ilu.spec_from_file_location("_oe_iface", _iface_path)
-    _imod = _ilu.module_from_spec(_ispec)  # type: ignore
-    _ispec.loader.exec_module(_imod)  # type: ignore
-    OpenEnvEnvironment = _imod.Environment
+    from openenv.core import Environment as OpenEnvEnvironment
 except Exception:
     from typing import TypeVar, Generic
     from pydantic import BaseModel
     _A = TypeVar("_A")
     _O = TypeVar("_O")
     _S = TypeVar("_S")
-    class OpenEnvEnvironment(Generic[_A, _O, _S]):  # type: ignore[no-redef]
+    class OpenEnvEnvironment(Generic[_A, _O, _S]):
         def __init__(self): pass
 
 from models import Observation, Action, Reward, OpsSIMObservation, OpsSIMAction, OpsSIMState
