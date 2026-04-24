@@ -13,6 +13,8 @@ MODEL_NAME = os.getenv("MODEL_NAME")
 HF_TOKEN = os.getenv("HF_TOKEN")
 MAX_STEPS = 15
 LLM_SEED = 42
+MAX_RETRIES = 3
+STAGNATION_WINDOW = 3
 
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
@@ -27,6 +29,15 @@ CRITICAL_KW = ["failing", "offline", "dead", "severed", "down", "failed", "timeo
 DEGRADED_KW = ["degraded", "overloaded", "stressed", "backed_up", "stalled", "pressure",
                "stale", "flapping", "at_risk", "unknown", "slow", "high", "dropping",
                "draining", "rerouting", "rotating", "partial"]
+
+VALID_ROOT_DOMAINS = {"database", "infra", "network", "security", "application"}
+ROOT_DOMAIN_HINTS = {
+    "database": ["database", "db", "sql", "query", "replica", "replication", "transaction", "lock", "storage"],
+    "infra": ["infra", "node", "host", "cpu", "memory", "oom", "disk", "pod", "container", "kube", "kubernetes"],
+    "network": ["network", "dns", "latency", "packet", "route", "gateway", "timeout", "connection"],
+    "security": ["security", "auth", "token", "certificate", "tls", "ssl", "permission", "access", "credential", "firewall"],
+    "application": ["application", "app", "service", "worker", "queue", "middleware", "exception", "crash", "bug"],
+}
 
 
 class AgentMemory:
@@ -74,6 +85,15 @@ class AgentMemory:
         if len(self.reward_trend) < 3:
             return False
         return all(r < 0 for r in self.reward_trend[-3:])
+
+    def is_declining(self):
+        if len(self.reward_trend) < STAGNATION_WINDOW:
+            return False
+        recent = self.reward_trend[-STAGNATION_WINDOW:]
+        for i in range(1, len(recent)):
+            if recent[i] > recent[i - 1]:
+                return False
+        return True
 
     def last_failed(self):
         if self.actions and self.actions[-1]["reward"] < -0.15:
@@ -128,21 +148,11 @@ class StrategyTracker:
 
     def __init__(self):
         self.investigation_count = 0
-        self.confidence = 0.5
+        self.confidence = 0.0
         self.phase = "investigate"
         self.committed = False
         self.root_cause_locked = False
         self.last_confidence_source = "init"
-
-    @staticmethod
-    def _normalize_confidence(value):
-        try:
-            c = float(value)
-        except (TypeError, ValueError):
-            return 0.5
-        if 0.0 <= c <= 1.0:
-            return c
-        return 0.5
 
     @staticmethod
     def _is_investigation(action):
@@ -150,7 +160,21 @@ class StrategyTracker:
         return "investigate" in a or a.startswith("check_") or "diagnose" in a or "inspect" in a
 
     def ingest_llm_confidence(self, value, source="llm"):
-        self.confidence = self._normalize_confidence(value)
+        if value is None:
+            self.confidence = 0.5
+            self.last_confidence_source = source + "_default"
+            return
+        try:
+            c = float(value)
+        except (TypeError, ValueError):
+            self.confidence = 0.5
+            self.last_confidence_source = source + "_default"
+            return
+        if c < 0.0 or c > 1.0:
+            self.confidence = 0.5
+            self.last_confidence_source = source + "_default"
+            return
+        self.confidence = c
         self.last_confidence_source = source
 
     def record_step(self, action, reward, discovered_after):
@@ -229,6 +253,24 @@ def _get_anomalies(system_state):
     return out
 
 
+def _infer_root_domain(root_cause_analysis, anomalies):
+    text = ((root_cause_analysis or "") + "\n" + "\n".join(anomalies or [])).lower()
+    scores = {}
+    for domain, hints in ROOT_DOMAIN_HINTS.items():
+        scores[domain] = sum(text.count(h) for h in hints)
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "application"
+
+
+def _root_domain_matches_anomalies(root_domain, system_state):
+    if root_domain not in ROOT_DOMAIN_HINTS:
+        return True
+    anomaly_text = "\n".join(_get_anomalies(system_state)).lower()
+    if not anomaly_text:
+        return True
+    return any(h in anomaly_text for h in ROOT_DOMAIN_HINTS[root_domain])
+
+
 def _flatten(d, prefix=""):
     out = {}
     for k, v in d.items():
@@ -286,48 +328,30 @@ def _extract_json(text):
     return None
 
 
-def _state_aware_select(env, available_actions, memory, obs_actions, action_domains):
-    tr = env.state_data.get("transition_rules", {})
-    state = env.state_data["state"]
-    discovered = state.get("discovered", {})
-    root_found = any(v for k, v in discovered.items() if "root_cause" in k and v)
+def _is_feasible(env, action_str):
+    if action_str == "do_nothing":
+        return True
+    tr = env.state_data.get("transition_rules", {}).get(action_str, {})
     penalties = env.state_data.get("penalties", {})
-    conflict_pairs = env.state_data.get("conflict_pairs", [])
-    last_action = memory.actions[-1]["action"] if memory.actions else None
+    penalty = float(penalties.get(action_str, 0))
+    cond = tr.get("condition", "") if tr else ""
+    cond_met = env.evaluate_condition(env.state_data["state"], cond) if cond else True
+    if penalty <= -0.3 and not cond_met:
+        return False
+    if tr and not cond_met:
+        else_r = float(tr.get("else_reward", 0))
+        if else_r < -0.05:
+            return False
+    return True
 
-    candidates = []
-    for action in available_actions:
-        if action in memory.completed_actions or action in obs_actions:
-            continue
-        agent = _agent_for_action(action, action_domains)
-        if not agent:
-            continue
-        rule = tr.get(action, {})
-        cond_met = _condition_met(env, action)
-        expected = float(rule.get("reward", 0)) if cond_met else float(rule.get("else_reward", -0.1))
-        score = expected
-        if cond_met:
-            score += 0.5
-        is_investigate = "investigate" in action or "check_" in action
-        if is_investigate and not root_found:
-            score += 0.3
-        if action in memory.failed_actions:
-            score -= 2.0
-        if action in penalties:
-            p = float(penalties[action])
-            if p <= -0.3 and not cond_met:
-                score -= 1.0
-        if last_action:
-            for pair in conflict_pairs:
-                if action in pair and last_action in pair and action != last_action:
-                    score -= 0.5
-                    break
-        candidates.append((score, action, agent))
 
-    candidates.sort(reverse=True)
-    if candidates:
-        return candidates[0][1], candidates[0][2]
-    return None, None
+def _is_unsafe(env, action_str):
+    penalties = env.state_data.get("penalties", {})
+    if action_str not in penalties:
+        return False
+    if float(penalties.get(action_str, 0)) > -0.3:
+        return False
+    return not _condition_met(env, action_str)
 
 
 def build_observability_prompt(system_state, root_cause_keywords, description):
@@ -344,13 +368,13 @@ Anomalies:
 You MUST include these keywords in your analysis: {', '.join(root_cause_keywords)}
 
 Return ONLY JSON:
-{{"root_cause_analysis": "<analysis using the keywords above>", "cascade_chain": "<A causes B causes C>", "confidence": <number between 0.0 and 1.0 reflecting how certain you are of the root cause>}}"""
+{{"root_cause_analysis": "<analysis using the keywords above>", "cascade_chain": "<A causes B causes C>", "root_domain": "<one of: database | infra | network | security | application>", "confidence": <number between 0.0 and 1.0 reflecting how certain you are of the root cause>}}"""
 
 
 def build_planning_prompt(system_state, playbook_text, memory, planner,
                           action_domains, obs_actions, step_count, goal_state,
                           progress, description, available_actions, suggested_order,
-                          strategy=None):
+                          strategy=None, feasibility_map=None, replan_feedback=""):
     anomalies = _get_anomalies(system_state)
     anomaly_text = "\n".join(anomalies) if anomalies else "  All healthy"
 
@@ -360,35 +384,67 @@ def build_planning_prompt(system_state, playbook_text, memory, planner,
     history_text = memory.format_history()
     plan_text = planner.format_plan()
 
+    root_domain = getattr(memory, "root_domain", "")
+    root_confidence = getattr(memory, "root_confidence", None)
+    domain_locked = getattr(memory, "domain_locked", True)
     allow_invest = True if strategy is None else strategy.allow_investigation()
+    if root_confidence is not None and root_confidence < 0.5:
+        allow_invest = True
+    if not domain_locked:
+        allow_invest = True
+    feasibility_map = feasibility_map or {}
     avail_text = ""
     for domain, actions in action_domains.items():
         if domain == "observability":
             continue
+        if domain_locked and root_domain and domain != root_domain:
+            continue
         agent = DOMAIN_TO_AGENT.get(domain, domain)
-        filtered = []
+        feasible_list = []
+        blocked_list = []
         for a in actions:
             if a in memory.completed_actions or a in obs_actions:
                 continue
             if not allow_invest and StrategyTracker._is_investigation(a):
                 continue
-            filtered.append(a)
-        if filtered:
-            avail_text += f"  {agent}: {', '.join(filtered)}\n"
+            if a in memory.failed_actions:
+                continue
+            if feasibility_map.get(a, True):
+                feasible_list.append(a)
+            else:
+                blocked_list.append(a)
+        if feasible_list:
+            avail_text += f"  {agent} [FEASIBLE NOW]: {', '.join(feasible_list)}\n"
+        if blocked_list:
+            avail_text += f"  {agent} [PRECONDITIONS NOT MET - DO NOT PICK]: {', '.join(blocked_list)}\n"
 
     unmet = [g for g, met in (goal_state or {}).items() if not met]
     unmet_text = "\n".join(f"  - {g}" for g in unmet) if unmet else "  All met!"
 
     warnings = ""
     if memory.is_stagnating():
-        warnings += "\nWARNING: Last 3 actions had negative reward. REVISE YOUR PLAN."
+        warnings += "\nWARNING: Last 3 actions had negative reward. The current approach is not working. You MUST switch to a DIFFERENT strategy that directly targets the ROOT CAUSE. Do NOT repeat similar actions."
+    if memory.is_declining():
+        warnings += "\nWARNING: Reward trend is declining. Previous actions REDUCED system health. Pick a different feasible action that improves system state and addresses the root cause upstream dependency."
+        warnings += "\nROOT DOMAIN VALIDATION: Recent reward evidence is weakening confidence in the current root domain. Re-investigation is allowed and domain reconsideration is allowed only if anomalies support it."
+    if not domain_locked:
+        warnings += "\nPrevious strategy is failing. Re-evaluate root cause."
     last_fail = memory.last_failed()
     if last_fail:
-        warnings += f"\nLAST ACTION FAILED: {last_fail['action']} (reward={last_fail['reward']:+.3f}). Adapt strategy."
+        warnings += f"\nLAST ACTION FAILED: {last_fail['action']} (reward={last_fail['reward']:+.3f}). Do NOT repeat it and do NOT choose similar actions in the same direction; switch strategy to address the ROOT CAUSE."
+    if memory.failed_actions:
+        warnings += f"\nBANNED (previously failed, do NOT choose): {', '.join(sorted(memory.failed_actions))}"
+
+    if replan_feedback:
+        warnings += f"\nREPLAN REQUIRED: {replan_feedback}"
 
     root_note = ""
     if memory.root_cause_analysis:
         root_note = f"\nROOT CAUSE ANALYSIS: {memory.root_cause_analysis}"
+    if root_domain:
+        root_note += f"\nROOT DOMAIN: {root_domain}"
+    if root_confidence is not None:
+        root_note += f"\nROOT DOMAIN CONFIDENCE: {root_confidence:.2f}"
 
     hint_text = ""
     if suggested_order:
@@ -400,7 +456,14 @@ def build_planning_prompt(system_state, playbook_text, memory, planner,
     phase_rule = ""
     if strategy is not None:
         strategy_text = "\nSTRATEGY STATE:\n" + strategy.format_status()
-        if strategy.phase == "execute" or not strategy.allow_investigation():
+        if root_confidence is not None and root_confidence < 0.5:
+            phase_rule = (f"\nCONFIDENCE RULE: Root domain confidence is {root_confidence:.2f} (< 0.50). "
+                          "Investigation actions are allowed. Do NOT force strict execution yet. "
+                          "Use investigation to validate the root domain against anomalies.")
+        elif root_confidence is not None and root_confidence >= 0.5:
+            phase_rule = (f"\nCONFIDENCE RULE: Root domain confidence is {root_confidence:.2f} (>= 0.50). "
+                          "Commit to execution in the current root domain and avoid unnecessary investigation.")
+        elif strategy.phase == "execute" or not strategy.allow_investigation():
             phase_rule = ("\nPHASE RULE: Investigation phase is CLOSED. "
                           "You MUST commit to fix/execution actions now. "
                           "Do NOT choose investigate_* or check_* actions.")
@@ -413,8 +476,8 @@ def build_planning_prompt(system_state, playbook_text, memory, planner,
         else:
             phase_rule += "\nPLAN RULE: Keep current plan stable. Only revise if truly necessary."
 
-    return f"""DO NOT output anything except valid JSON.
-You are the Incident Commander. You are the PRIMARY decision-maker. Reason step by step from the memory, plan, and system state, then choose the next action.
+    return f"""Return ONLY one valid JSON object.
+You are the Incident Commander. Choose the next action from the available actions only.
 
 INCIDENT: {description}
 PLAYBOOK: {playbook_text}{root_note}
@@ -435,22 +498,28 @@ CURRENT PLAN:
 UNMET SLA GOALS:
 {unmet_text}
 
-AVAILABLE ACTIONS (by domain agent):
+PRIMARY ROOT CAUSE DOMAIN: {getattr(memory, "root_domain", "")}
+
+AVAILABLE ACTIONS (feasibility annotated):
 {avail_text}{hint_text}{warnings}{phase_rule}
 
 Step {step_count}/{MAX_STEPS} | Progress: {progress:.0%}
 
 RULES:
-- Your decision MUST be grounded in: (1) memory of prior actions/outcomes, (2) the current plan, (3) current system state and anomalies.
-- Detect -> diagnose -> COMMIT -> fix -> restore. Do not re-investigate once you have enough signal.
-- Fix root causes before symptoms. Dependencies: infrastructure -> database -> application.
+- Use memory, current state, anomalies, and root cause analysis.
+- Choose ONLY from actions listed under [FEASIBLE NOW].
+- NEVER choose actions listed under [PRECONDITIONS NOT MET].
 - NEVER repeat completed or failed actions.
 - NEVER use observability actions.
-- Keep the plan stable unless a failure, stagnation, or new critical information forces a revision.
-- reasoning MUST explicitly reference prior outcomes or observed state (not generic text).
+- If domain is locked, stay in the PRIMARY ROOT CAUSE DOMAIN.
+- If domain is unlocked, re-evaluate root cause and you may investigate across domains.
+- Follow dependency order: upstream -> root cause -> downstream.
+- If multiple actions are feasible, choose the one closest to the root cause.
+- If prior actions failed or progress is stalled, choose a different valid action.
 
 Return ONLY JSON:
-{{"analysis": "<situation assessment grounded in state+memory>", "plan": ["action1", "action2", ...], "next_action": "<action_name>", "target_agent": "<AgentName>", "reasoning": "<why this action next, citing memory/state>", "confidence": <number between 0.0 and 1.0 reflecting how certain you are of the root cause / fix strategy>}}"""
+{{"analysis": "<situation assessment grounded in state+memory>", "plan": ["action1", "action2", ...], "next_action": "<action_name>", "target_agent": "<AgentName>", "reasoning": "<why this action next, citing memory/state>", "confidence": <number between 0.0 and 1.0 reflecting how certain you are of the root cause / fix strategy>}}
+Do not output markdown, backticks, or any extra text."""
 
 
 def _parse_planning_response(text, available_actions, action_domains, memory, obs_actions, env, strategy=None):
@@ -459,12 +528,19 @@ def _parse_planning_response(text, available_actions, action_domains, memory, ob
     llm_confidence = None
     if data:
         llm_confidence = data.get("confidence")
-        plan = data.get("plan", [])
-        action = data.get("next_action", "")
-        valid_plan = [a for a in plan if a in available_actions and a not in memory.completed_actions and a not in obs_actions]
+        plan = data.get("plan", []) or []
+        action = data.get("next_action", "") or ""
+        valid_plan = []
+        for a in plan:
+            if not isinstance(a, str):
+                continue
+            if a in available_actions and a not in memory.completed_actions and a not in obs_actions:
+                valid_plan.append(a)
 
         def _violates_phase(a):
             if strategy is None:
+                return False
+            if not getattr(memory, "domain_locked", True) and StrategyTracker._is_investigation(a):
                 return False
             if not strategy.allow_investigation() and StrategyTracker._is_investigation(a):
                 return True
@@ -500,22 +576,41 @@ def _parse_planning_response(text, available_actions, action_domains, memory, ob
                         "analysis": data.get("analysis", ""), "reasoning": "from_llm_plan",
                         "llm_decided": True, "invalid_reason": "", "confidence": llm_confidence}
 
-    for action in available_actions:
-        if action in memory.completed_actions or action in obs_actions:
-            continue
-        if action in memory.failed_actions:
-            continue
-        if strategy is not None and not strategy.allow_investigation() and StrategyTracker._is_investigation(action):
-            continue
-        agent = _agent_for_action(action, action_domains)
-        if agent:
-            return {"action": action, "target_agent": agent, "plan": [], "analysis": "",
-                    "reasoning": "safety_fallback_invalid_llm", "llm_decided": False,
-                    "invalid_reason": invalid_reason, "confidence": llm_confidence}
+    return {"action": "", "target_agent": "", "plan": [], "analysis": "",
+            "reasoning": "llm_parse_failed", "llm_decided": False,
+            "invalid_reason": invalid_reason, "confidence": llm_confidence}
 
-    return {"action": "do_nothing", "target_agent": "AppOps", "plan": [], "analysis": "",
-            "reasoning": "exhausted", "llm_decided": False, "invalid_reason": invalid_reason,
-            "confidence": llm_confidence}
+
+def _build_feasibility_map(env, available_actions, obs_actions, memory, action_domains):
+    fmap = {}
+    for a in available_actions:
+        if a in obs_actions:
+            continue
+        if a in memory.completed_actions or a in memory.failed_actions:
+            continue
+        if not _agent_for_action(a, action_domains):
+            continue
+        fmap[a] = _is_feasible(env, a)
+    return fmap
+
+
+def _validate_llm_decision(decision, env, memory, obs_actions):
+    if not decision.get("llm_decided"):
+        return False, decision.get("invalid_reason") or "llm_parse_failed"
+    action = decision.get("action", "")
+    if not action:
+        return False, "empty_action"
+    if action in obs_actions:
+        return False, "obs_action_not_allowed"
+    if action in memory.completed_actions:
+        return False, "already_completed"
+    if action in memory.failed_actions:
+        return False, "previously_failed"
+    if _is_unsafe(env, action):
+        return False, "unsafe_harmful_with_preconditions_not_met"
+    if not _is_feasible(env, action):
+        return False, "infeasible_preconditions_not_met"
+    return True, ""
 
 
 def _run_episode_core(room):
@@ -525,29 +620,56 @@ def _run_episode_core(room):
     description = obs.logs or ""
     action_domains = room.env.state_data.get("action_domains", {})
     root_cause_keywords = room.env.state_data.get("root_cause_keywords", [])
-    penalties = room.get_penalties()
     obs_actions = set(action_domains.get("observability", []))
     suggested_order = room.env.state_data.get("optimal_solution_path", [])
 
     memory = AgentMemory()
     planner = PlanTracker()
     strategy = StrategyTracker()
+    memory.domain_locked = True
 
     system_state = room.env.state_data["state"]
     obs_prompt = build_observability_prompt(system_state, root_cause_keywords, description)
     obs_text = call_llm(obs_prompt, max_tokens=300)
     obs_data = _extract_json(obs_text)
+    anomaly_list = _get_anomalies(system_state)
     if obs_data:
-        obs_msg = f"[ROOT CAUSE] {obs_data.get('root_cause_analysis', '')} | Chain: {obs_data.get('cascade_chain', '')}"
-        memory.root_cause_analysis = obs_data.get("root_cause_analysis", "")
-        strategy.ingest_llm_confidence(obs_data.get("confidence"), source="observability_llm")
+        root_analysis = obs_data.get("root_cause_analysis", "")
+        root_domain = (obs_data.get("root_domain") or "").strip().lower()
+        if root_domain not in VALID_ROOT_DOMAINS:
+            root_domain = _infer_root_domain(root_analysis, anomaly_list)
+        try:
+            root_confidence = float(obs_data.get("confidence"))
+        except (TypeError, ValueError):
+            root_confidence = 0.5
+        if root_confidence < 0.0 or root_confidence > 1.0:
+            root_confidence = 0.5
+        if not _root_domain_matches_anomalies(root_domain, system_state):
+            root_confidence *= 0.7
+        obs_msg = f"[ROOT CAUSE] {root_analysis} | Chain: {obs_data.get('cascade_chain', '')} | Domain: {root_domain} | Confidence: {root_confidence:.2f}"
+        memory.root_cause_analysis = root_analysis
+        memory.root_domain = root_domain
+        memory.root_confidence = root_confidence
+        strategy.ingest_llm_confidence(root_confidence, source="observability_llm")
     else:
         obs_msg = f"[ROOT CAUSE] Detected anomalies involving: {', '.join(root_cause_keywords)}"
         memory.root_cause_analysis = f"Anomalies involving: {', '.join(root_cause_keywords)}"
-        strategy.ingest_llm_confidence(None, source="observability_llm")
+        memory.root_domain = _infer_root_domain(memory.root_cause_analysis, anomaly_list)
+        memory.root_confidence = 0.5
+        if not _root_domain_matches_anomalies(memory.root_domain, system_state):
+            memory.root_confidence *= 0.7
+        strategy.ingest_llm_confidence(memory.root_confidence, source="observability_llm_fallback")
+    if root_cause_keywords:
+        lower = obs_msg.lower()
+        missing = [k for k in root_cause_keywords if k.lower() not in lower]
+        if missing:
+            obs_msg = obs_msg + " | keywords: " + ", ".join(root_cause_keywords)
     room.observe_and_communicate("ObservabilityOps", obs_msg)
 
     rewards_list = []
+    recent_rewards = []
+    zero_progress_steps = 0
+    last_progress = 0.0
 
     for step in range(MAX_STEPS):
         if room.is_done():
@@ -558,33 +680,88 @@ def _run_episode_core(room):
         goal_state = room.get_goal_state()
         progress = room.get_progress()
 
-        prompt = build_planning_prompt(
-            system_state, playbook_text, memory, planner,
-            action_domains, obs_actions, step + 1, goal_state,
-            progress, description, available_actions, suggested_order,
-            strategy,
+        feasibility_map = _build_feasibility_map(
+            room.env, available_actions, obs_actions, memory, action_domains
         )
 
-        llm_text = call_llm(prompt, max_tokens=400)
-        decision = _parse_planning_response(
-            llm_text, available_actions, action_domains, memory, obs_actions, room.env, strategy
-        )
+        decision = None
+        replan_feedback = ""
+        attempts = 0
+        valid = False
+        last_invalid_reason = ""
+        last_reward = rewards_list[-1] if rewards_list else None
+
+        while not valid and attempts < MAX_RETRIES:
+            attempts += 1
+            prompt = build_planning_prompt(
+                system_state, playbook_text, memory, planner,
+                action_domains, obs_actions, step + 1, goal_state,
+                progress, description, available_actions, suggested_order,
+                strategy, feasibility_map, replan_feedback,
+            )
+            llm_text = call_llm(prompt, max_tokens=400)
+            decision = _parse_planning_response(
+                llm_text, available_actions, action_domains, memory, obs_actions, room.env, strategy
+            )
+            valid, reason = _validate_llm_decision(decision, room.env, memory, obs_actions)
+            if valid:
+                break
+            last_invalid_reason = reason
+            chosen = decision.get("action", "") or "<none>"
+            reward_note = f"last_step_reward={last_reward:+.3f}" if last_reward is not None else "no_prior_reward"
+            failed_list = ", ".join(sorted(memory.failed_actions)) or "<none>"
+            feasible_now = sorted([a for a, ok in feasibility_map.items() if ok]) or []
+            feasible_text = ", ".join(feasible_now) if feasible_now else "<none available>"
+            infeasible_now = sorted([a for a, ok in feasibility_map.items() if not ok]) or []
+            infeasible_text = ", ".join(infeasible_now) if infeasible_now else "<none>"
+            unsafe_flag = "YES" if (chosen and _is_unsafe(room.env, chosen)) else "NO"
+            replan_feedback = (
+                f"PREVIOUS ATTEMPT REJECTED (attempt {attempts}/{MAX_RETRIES}). "
+                f"Invalid action '{chosen}'. Reason: {reason}. Unsafe: {unsafe_flag}. "
+                f"Feasible now: {feasible_text}. "
+                f"Infeasible: {infeasible_text}. "
+                f"Failed before: {failed_list}. "
+                f"Reward: {reward_note}. "
+                f"Choose one DIFFERENT valid action from [FEASIBLE] only. "
+                f"If domain is unlocked, re-investigate root cause. "
+                f"Return JSON only."
+            )
+            print(f"[LLM-RETRY] step={step+1} attempt={attempts}/{MAX_RETRIES} rejected_action={chosen} reason={reason}")
+
+        if not valid:
+            recent_rewards.append(-1.0)
+            if len(recent_rewards) > 3:
+                recent_rewards.pop(0)
+            if progress == 0:
+                zero_progress_steps += 1
+            else:
+                zero_progress_steps = 0
+            rewards_decreasing = (
+                len(recent_rewards) == 3
+                and recent_rewards[0] > recent_rewards[1] > recent_rewards[2]
+            )
+            repeated_failure = last_invalid_reason in {"no_json", "infeasible_preconditions_not_met"}
+            if rewards_decreasing or zero_progress_steps >= 3 or repeated_failure:
+                memory.domain_locked = False
+            print(f"[LLM-SKIP] step={step+1} retries exhausted reason={last_invalid_reason}. Skipping step (no action executed).")
+            continue
+
+        llm_decided = True
+        analysis = decision.get("analysis", "")
+        reasoning = decision.get("reasoning", "")
+        invalid_reason = ""
+        llm_confidence_raw = decision.get("confidence")
+        new_plan = decision.get("plan", [])
 
         action_str = decision["action"]
         target_agent = decision["target_agent"]
-        new_plan = decision.get("plan", [])
-        llm_decided = decision.get("llm_decided", False)
-        analysis = decision.get("analysis", "")
-        reasoning = decision.get("reasoning", "")
-        invalid_reason = decision.get("invalid_reason", "")
-        llm_confidence_raw = decision.get("confidence")
 
         strategy.ingest_llm_confidence(llm_confidence_raw, source="planner_llm")
 
-        allow_revision = strategy.should_revise_plan(memory)
+        allow_revision = strategy.should_revise_plan(memory) or memory.is_declining()
         planner.maybe_update(new_plan, allow_revision)
 
-        print(f"[PLAN] step={step+1} revision={planner.revision_count} plan={planner.current_plan} llm={llm_decided} invalid={invalid_reason or 'none'}")
+        print(f"[PLAN] step={step+1} revision={planner.revision_count} plan={planner.current_plan} llm={llm_decided} invalid={invalid_reason or 'none'} attempts={attempts}")
         print(f"[STRATEGY] phase={strategy.phase} confidence={strategy.confidence:.2f} investigations={strategy.investigation_count}/{StrategyTracker.INVESTIGATION_LIMIT}")
         if analysis:
             print(f"[ANALYSIS] {analysis[:200]}")
@@ -592,15 +769,6 @@ def _run_episode_core(room):
             print(f"[REASONING] {reasoning[:200]}")
 
         supervisor_approved = True
-        if action_str in penalties and float(penalties.get(action_str, 0)) <= -0.3:
-            if not _condition_met(room.env, action_str):
-                supervisor_approved = False
-                alt, alt_ag = _state_aware_select(room.env, available_actions, memory, obs_actions, action_domains)
-                if alt and alt != action_str:
-                    print(f"[SUPERVISOR] VETOED {action_str} (condition not met, penalty={penalties[action_str]}). Alternative: {alt}")
-                    action_str = alt
-                    target_agent = alt_ag
-                    supervisor_approved = True
 
         result = room.execute_directive(target_agent, action_str, supervisor_approved)
         reward_val = result["reward"].value
@@ -610,6 +778,55 @@ def _run_episode_core(room):
         memory.record(step + 1, action_str, target_agent, reward_val, prev_state, new_state)
         planner.mark_done(action_str)
         strategy.record_step(action_str, reward_val, new_state.get("discovered", {}))
+        if hasattr(memory, "root_confidence"):
+            if reward_val > 0:
+                memory.root_confidence = min(1.0, memory.root_confidence + 0.05)
+            elif memory.is_declining() or memory.is_stagnating():
+                memory.root_confidence = max(0.0, memory.root_confidence * 0.7)
+
+        recent_rewards.append(reward_val)
+        if len(recent_rewards) > 3:
+            recent_rewards.pop(0)
+        current_progress = room.get_progress()
+        if current_progress == 0:
+            zero_progress_steps += 1
+        else:
+            zero_progress_steps = 0
+        rewards_decreasing = (
+            len(recent_rewards) == 3
+            and recent_rewards[0] > recent_rewards[1] > recent_rewards[2]
+        )
+        if rewards_decreasing or zero_progress_steps >= 3:
+            memory.domain_locked = False
+
+        if not getattr(memory, "domain_locked", True) and StrategyTracker._is_investigation(action_str):
+            refresh_prompt = build_observability_prompt(new_state, root_cause_keywords, description)
+            refresh_text = call_llm(refresh_prompt, max_tokens=300)
+            refresh_data = _extract_json(refresh_text)
+            refresh_anomalies = _get_anomalies(new_state)
+            if refresh_data:
+                refreshed_domain = (refresh_data.get("root_domain") or "").strip().lower()
+                if refreshed_domain not in VALID_ROOT_DOMAINS:
+                    refreshed_domain = _infer_root_domain(refresh_data.get("root_cause_analysis", ""), refresh_anomalies)
+                memory.root_cause_analysis = refresh_data.get("root_cause_analysis", memory.root_cause_analysis)
+                memory.root_domain = refreshed_domain
+                memory.domain_locked = True
+                try:
+                    refreshed_confidence = float(refresh_data.get("confidence"))
+                except (TypeError, ValueError):
+                    refreshed_confidence = memory.root_confidence
+                if 0.0 <= refreshed_confidence <= 1.0:
+                    memory.root_confidence = refreshed_confidence
+                    strategy.ingest_llm_confidence(refreshed_confidence, source="observability_llm_refresh")
+
+        last_progress = current_progress
+
+        if reward_val < -0.15 and action_str in planner.current_plan:
+            planner.current_plan.remove(action_str)
+
+        if root_cause_keywords and memory.is_stagnating():
+            repost = "[OBS UPDATE] Re-confirming keywords: " + ", ".join(root_cause_keywords)
+            room.observe_and_communicate("ObservabilityOps", repost)
 
         error_msg = room.env.last_action_error or "null"
         print(
