@@ -221,10 +221,13 @@ def call_llm(prompt, max_tokens=250):
             max_tokens=max_tokens,
             seed=LLM_SEED,
         )
-        return response.choices[0].message.content or ""
+        content = response.choices[0].message.content
+        if content is None or not str(content).strip():
+            return {"text": "", "status": "empty_response"}
+        return {"text": content, "status": "ok"}
     except Exception as e:
         print(f"[LLM-ERROR] {type(e).__name__}: {e}")
-        return ""
+        return {"text": "", "status": "llm_exception"}
 
 
 def _agent_for_action(action_str, action_domains):
@@ -523,9 +526,9 @@ Return ONLY JSON:
 Do not output markdown, backticks, or any extra text."""
 
 
-def _parse_planning_response(text, available_actions, action_domains, memory, obs_actions, env, strategy=None):
+def _parse_planning_response(text, available_actions, action_domains, memory, obs_actions, env, strategy=None, llm_status="ok"):
     data = _extract_json(text)
-    invalid_reason = "no_json"
+    invalid_reason = llm_status if llm_status != "ok" else "no_json"
     llm_confidence = None
     if data:
         llm_confidence = data.get("confidence")
@@ -631,7 +634,8 @@ def _run_episode_core(room):
 
     system_state = room.env.state_data["state"]
     obs_prompt = build_observability_prompt(system_state, root_cause_keywords, description)
-    obs_text = call_llm(obs_prompt, max_tokens=300)
+    obs_result = call_llm(obs_prompt, max_tokens=300)
+    obs_text = obs_result["text"]
     obs_data = _extract_json(obs_text)
     anomaly_list = _get_anomalies(system_state)
     if obs_data:
@@ -700,9 +704,10 @@ def _run_episode_core(room):
                 progress, description, available_actions, suggested_order,
                 strategy, feasibility_map, replan_feedback,
             )
-            llm_text = call_llm(prompt, max_tokens=400)
+            llm_result = call_llm(prompt, max_tokens=400)
+            llm_text = llm_result["text"]
             decision = _parse_planning_response(
-                llm_text, available_actions, action_domains, memory, obs_actions, room.env, strategy
+                llm_text, available_actions, action_domains, memory, obs_actions, room.env, strategy, llm_result["status"]
             )
             valid, reason = _validate_llm_decision(decision, room.env, memory, obs_actions)
             if valid:
@@ -814,7 +819,8 @@ def _run_episode_core(room):
 
         if not getattr(memory, "domain_locked", True) and StrategyTracker._is_investigation(action_str):
             refresh_prompt = build_observability_prompt(new_state, root_cause_keywords, description)
-            refresh_text = call_llm(refresh_prompt, max_tokens=300)
+            refresh_result = call_llm(refresh_prompt, max_tokens=300)
+            refresh_text = refresh_result["text"]
             refresh_data = _extract_json(refresh_text)
             refresh_anomalies = _get_anomalies(new_state)
             if refresh_data:
