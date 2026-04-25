@@ -16,6 +16,29 @@ def sanitize_tag(value: str) -> str:
     return cleaned[:256] or "default"
 
 
+def model_slug(model: str) -> str:
+    lowered = model.lower()
+    match = re.search(r"(\d+(?:\.\d+)?)b", lowered)
+    if match:
+        size = match.group(1).replace(".", "p")
+        return f"qwen25-{size}b"
+    cleaned = lowered.split("/")[-1]
+    cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned).strip("-")
+    return cleaned or "model"
+
+
+def stage_paths(model: str, hf_user: str) -> dict[str, str]:
+    slug = model_slug(model)
+    return {
+        "smoke_output": f"outputs/smoke-{slug}",
+        "sft_output": f"outputs/sft-{slug}",
+        "grpo_output": f"outputs/grpo-{slug}",
+        "smoke_repo": f"{hf_user}/opssim-{slug}-smoke-lora",
+        "sft_repo": f"{hf_user}/opssim-{slug}-sft-lora",
+        "grpo_repo": f"{hf_user}/opssim-{slug}-grpo-lora",
+    }
+
+
 def shell_prelude(repo_url: str, branch: str) -> str:
     return (
         "(command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)) && "
@@ -28,63 +51,67 @@ def shell_prelude(repo_url: str, branch: str) -> str:
 
 
 def smoke_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
+    paths = stage_paths(model, hf_user)
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
         f"python train_sft.py --model {model} "
         "--train-file data/generated/sft_train.jsonl "
         "--val-file data/generated/sft_val.jsonl "
-        "--output-dir outputs/smoke-sft "
-        f"--hub-model-id {hf_user}/opssim-qwen25-1p5b-smoke-lora "
+        f"--output-dir {paths['smoke_output']} "
+        f"--hub-model-id {paths['smoke_repo']} "
         "--max-steps 10 --batch-size 1 --grad-accum 1 --max-seq-length 1024"
     )
 
 
 def sft_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
+    paths = stage_paths(model, hf_user)
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
         f"python train_sft.py --model {model} "
         "--train-file data/generated/sft_train.jsonl "
         "--val-file data/generated/sft_val.jsonl "
-        "--output-dir outputs/sft-qwen2.5-1.5b "
-        f"--hub-model-id {hf_user}/opssim-qwen25-1p5b-sft-lora "
+        f"--output-dir {paths['sft_output']} "
+        f"--hub-model-id {paths['sft_repo']} "
         "--epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536 --save-steps 50"
     )
 
 
 def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
+    paths = stage_paths(model, hf_user)
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
         f"python train_grpo.py --model {model} "
-        f"--sft-adapter {hf_user}/opssim-qwen25-1p5b-sft-lora "
+        f"--sft-adapter {paths['sft_repo']} "
         "--input tasks/cascade.json "
         "--prompt-file data/generated/grpo_prompts.jsonl "
-        "--output-dir outputs/grpo-qwen2.5-1.5b "
-        f"--hub-model-id {hf_user}/opssim-qwen25-1p5b-grpo-lora "
+        f"--output-dir {paths['grpo_output']} "
+        f"--hub-model-id {paths['grpo_repo']} "
         "--max-steps 100 --batch-size 2 --grad-accum 2 "
         "--num-generations 2 --max-completion-length 512 --max-prompt-length 1536"
     )
 
 
 def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
+    paths = stage_paths(model, hf_user)
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
         f"python train_sft.py --model {model} "
         "--train-file data/generated/sft_train.jsonl "
         "--val-file data/generated/sft_val.jsonl "
-        "--output-dir outputs/sft-qwen2.5-1.5b "
-        f"--hub-model-id {hf_user}/opssim-qwen25-1p5b-sft-lora "
+        f"--output-dir {paths['sft_output']} "
+        f"--hub-model-id {paths['sft_repo']} "
         "--epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536 --save-steps 50 && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
         f"python train_grpo.py --model {model} "
-        f"--sft-adapter {hf_user}/opssim-qwen25-1p5b-sft-lora "
+        f"--sft-adapter {paths['sft_repo']} "
         "--input tasks/cascade.json "
         "--prompt-file data/generated/grpo_prompts.jsonl "
-        "--output-dir outputs/grpo-qwen2.5-1.5b "
-        f"--hub-model-id {hf_user}/opssim-qwen25-1p5b-grpo-lora "
+        f"--output-dir {paths['grpo_output']} "
+        f"--hub-model-id {paths['grpo_repo']} "
         "--max-steps 100 --batch-size 2 --grad-accum 2 "
         "--num-generations 2 --max-completion-length 512 --max-prompt-length 1536"
     )
@@ -131,6 +158,7 @@ def main() -> None:
     print(f"  flavor: {args.flavor}")
     print(f"  timeout: {timeout}")
     print(f"  namespace: {args.namespace}")
+    print(f"  model: {args.model}")
     print("\nCommand preview:")
     print(textwrap.shorten(script, width=500, placeholder=" ..."))
 
