@@ -222,7 +222,8 @@ def call_llm(prompt, max_tokens=250):
             seed=LLM_SEED,
         )
         return response.choices[0].message.content or ""
-    except Exception:
+    except Exception as e:
+        print(f"[LLM-ERROR] {type(e).__name__}: {e}")
         return ""
 
 
