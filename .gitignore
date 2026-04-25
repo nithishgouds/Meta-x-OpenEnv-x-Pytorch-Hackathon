@@ -4,7 +4,6 @@ __pycache__/
 models/
 opssim-grpo-output/
 runs/
-plots/
 outputs/
 data/generated/
 sft_dataset*.json*
