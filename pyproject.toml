@@ -6,12 +6,19 @@ requires-python = ">=3.11"
 authors = [{ name = "Sandeep, Venkatesh, Nithish" }]
 dependencies = [
     "pydantic",
+    "huggingface_hub",
     "openai",
     "requests",
     "python-dotenv",
     "openenv-core==0.2.3",
     "fastapi",
-    "uvicorn"
+    "uvicorn",
+    "torch",
+    "transformers>=5.2.0",
+    "trl>=1.2.0",
+    "datasets",
+    "peft",
+    "accelerate"
 ]
 
 [build-system]
@@ -22,7 +29,7 @@ build-backend = "setuptools.build_meta"
 server = "server.app:main"
 
 [tool.setuptools]
-py-modules = ["env", "models", "inference", "multi_agent", "train"]
+py-modules = ["env", "models", "inference", "multi_agent", "train", "train_sft", "train_grpo", "generate_sft_dataset"]
 
 [tool.setuptools.packages.find]
 include = ["server"]
