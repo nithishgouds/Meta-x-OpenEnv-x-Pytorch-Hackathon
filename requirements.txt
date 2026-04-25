@@ -12,3 +12,4 @@ trl>=1.2.0
 datasets
 peft
 accelerate
+jmespath
