@@ -137,7 +137,7 @@ def main() -> None:
     parser.add_argument("stage", choices=["smoke", "sft", "grpo", "all"])
     # a100-large = 80GB A100 at ~$2.50/h. Required for 3B + frozen reference
     # + bf16 activations under GRPO with batch=4 and num_generations=4.
-    parser.add_argument("--flavor", default="a100-large")
+    parser.add_argument("--flavor", default="l40sx1")
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--namespace", default=os.environ.get("HF_USER", "meancodi"))
     parser.add_argument("--hf-user", default=os.environ.get("HF_USER", "meancodi"))
