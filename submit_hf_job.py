@@ -80,6 +80,12 @@ def sft_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
 
 def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
     paths = stage_paths(model, hf_user)
+    # Env-grounded GRPO defaults: with batch_size=4 and num_generations=4 the
+    # trainer batches all four generations per prompt into a single model.generate
+    # call (no per-completion overhead). Effective batch = 4 * grad_accum 2 = 8
+    # unique prompts per step / 4 generations = 2 prompts per optimizer step.
+    # 300 steps * 8 generations = 2400 completions, comfortably within $25 on
+    # an A100-large at ~$2.50/h.
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
@@ -89,8 +95,9 @@ def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 100 --batch-size 2 --grad-accum 2 "
-        "--num-generations 2 --max-completion-length 512 --max-prompt-length 1536"
+        "--max-steps 300 --batch-size 4 --grad-accum 2 "
+        "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
+        "--learning-rate 2e-6 --beta 0.05"
     )
 
 
@@ -112,8 +119,9 @@ def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> st
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 100 --batch-size 2 --grad-accum 2 "
-        "--num-generations 2 --max-completion-length 512 --max-prompt-length 1536"
+        "--max-steps 300 --batch-size 4 --grad-accum 2 "
+        "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
+        "--learning-rate 2e-6 --beta 0.05"
     )
 
 
@@ -127,11 +135,13 @@ def get_token() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Submit OpsSim-AI training jobs to Hugging Face Jobs.")
     parser.add_argument("stage", choices=["smoke", "sft", "grpo", "all"])
-    parser.add_argument("--flavor", default="l4x1")
+    # a100-large = 80GB A100 at ~$2.50/h. Required for 3B + frozen reference
+    # + bf16 activations under GRPO with batch=4 and num_generations=4.
+    parser.add_argument("--flavor", default="a100-large")
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--namespace", default=os.environ.get("HF_USER", "meancodi"))
     parser.add_argument("--hf-user", default=os.environ.get("HF_USER", "meancodi"))
-    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-1.5B-Instruct"))
+    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-3B-Instruct"))
     parser.add_argument("--repo-url", default=os.environ.get("REPO_URL", "https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git"))
     parser.add_argument("--branch", default=os.environ.get("REPO_BRANCH", "sandeep"))
     parser.add_argument("--dry-run", action="store_true")
@@ -143,11 +153,15 @@ def main() -> None:
         "grpo": lambda: grpo_command(args.repo_url, args.branch, args.model, args.hf_user),
         "all": lambda: combined_command(args.repo_url, args.branch, args.model, args.hf_user),
     }
+    # GRPO with env-grounded reward, 300 steps, num_generations=4 on A100-large
+    # is realistically a 2.5-3.5h job; budget 4h to absorb container/launch
+    # overhead. Combined SFT+GRPO budgeted at 6h to stay inside the $25 cap
+    # (4h GRPO + ~1h SFT + setup).
     default_timeouts = {
         "smoke": "20m",
-        "sft": "1h",
-        "grpo": "1h",
-        "all": "2h",
+        "sft": "2h",
+        "grpo": "4h",
+        "all": "6h",
     }
     timeout = args.timeout or default_timeouts[args.stage]
     script = commands[args.stage]()

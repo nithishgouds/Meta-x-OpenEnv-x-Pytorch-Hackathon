@@ -17,6 +17,13 @@ from transformers import (
     set_seed,
 )
 
+from training_logging import (
+    append_jsonl as _append_jsonl,
+    auto_generate_plots,
+    install_console_logger,
+    write_final_metrics,
+)
+
 
 def format_messages(tokenizer, messages: list[dict[str, str]], add_generation_prompt: bool = False) -> str:
     if getattr(tokenizer, "chat_template", None):
@@ -63,8 +70,9 @@ def ensure_plot_dirs(output_dir: str) -> dict[str, str]:
 
 
 def append_jsonl(path: str, payload: dict[str, Any]) -> None:
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload) + "\n")
+    # Use the shared helper so writes are flushed every step and parent
+    # directories are created consistently.
+    _append_jsonl(path, payload)
 
 
 def summarize_split(split) -> dict[str, float | int]:
@@ -205,6 +213,9 @@ def main() -> None:
         raise FileNotFoundError(f"Training file not found: {args.train_file}")
 
     set_seed(args.seed)
+    os.makedirs(args.output_dir, exist_ok=True)
+    log_path = install_console_logger(args.output_dir, stage="sft")
+    print(f"[sft] console mirrored to {log_path}", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -299,6 +310,19 @@ def main() -> None:
     }
     with open(plot_paths["summary"], "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
+
+    final = {
+        "stage": "sft",
+        "model": args.model,
+        "final_global_step": trainer.state.global_step,
+        "final_epoch": trainer.state.epoch,
+        "train_rows": summary["train_rows"],
+        "validation_rows": summary["validation_rows"],
+        "best_metric": summary["best_metric"],
+    }
+    write_final_metrics(args.output_dir, final)
+
+    auto_generate_plots(args.output_dir, stage="sft")
 
     if args.hub_model_id:
         trainer.push_to_hub()
