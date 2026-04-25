@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +12,9 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
+    set_seed,
 )
 
 
@@ -30,14 +33,87 @@ def format_messages(tokenizer, messages: list[dict[str, str]], add_generation_pr
     return "\n\n".join(rendered)
 
 
+def resolve_precision(precision: str) -> tuple[torch.dtype, bool, bool]:
+    if precision == "bf16":
+        return torch.bfloat16, True, False
+    if precision == "fp16":
+        return torch.float16, False, True
+    return torch.float32, False, False
+
+
+def build_run_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    metadata = {"args": vars(args)}
+    try:
+        metadata["git_sha"] = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        metadata["git_sha"] = "unknown"
+    return metadata
+
+
+def ensure_plot_dirs(output_dir: str) -> dict[str, str]:
+    plot_dir = os.path.join(output_dir, "plot_data")
+    os.makedirs(plot_dir, exist_ok=True)
+    return {
+        "root": plot_dir,
+        "train": os.path.join(plot_dir, "train_metrics.jsonl"),
+        "eval": os.path.join(plot_dir, "eval_metrics.jsonl"),
+        "summary": os.path.join(plot_dir, "summary.json"),
+        "dataset": os.path.join(plot_dir, "dataset_profile.json"),
+    }
+
+
+def append_jsonl(path: str, payload: dict[str, Any]) -> None:
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload) + "\n")
+
+
+def summarize_split(split) -> dict[str, float | int]:
+    input_lengths = [len(row["input_ids"]) for row in split]
+    target_lengths = [sum(1 for token in row["labels"] if token != -100) for row in split]
+    return {
+        "num_examples": len(split),
+        "min_input_tokens": min(input_lengths) if input_lengths else 0,
+        "max_input_tokens": max(input_lengths) if input_lengths else 0,
+        "avg_input_tokens": round(sum(input_lengths) / len(input_lengths), 2) if input_lengths else 0.0,
+        "min_target_tokens": min(target_lengths) if target_lengths else 0,
+        "max_target_tokens": max(target_lengths) if target_lengths else 0,
+        "avg_target_tokens": round(sum(target_lengths) / len(target_lengths), 2) if target_lengths else 0.0,
+    }
+
+
+class PlotMetricsCallback(TrainerCallback):
+    def __init__(self, paths: dict[str, str]):
+        self.paths = paths
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        payload = {
+            "step": state.global_step,
+            "epoch": float(state.epoch) if state.epoch is not None else None,
+            **logs,
+        }
+        target = self.paths["eval"] if any(key.startswith("eval_") for key in logs) else self.paths["train"]
+        append_jsonl(target, payload)
+
+
+def find_last_subsequence(sequence: list[int], subsequence: list[int]) -> int:
+    if not subsequence or len(subsequence) > len(sequence):
+        return -1
+    for start in range(len(sequence) - len(subsequence), -1, -1):
+        if sequence[start : start + len(subsequence)] == subsequence:
+            return start
+    return -1
+
+
 def tokenize_example(example: dict[str, Any], tokenizer, max_seq_length: int) -> dict[str, Any]:
     messages = example["messages"]
-    prompt_messages = messages[:-1]
-
-    prompt_text = format_messages(tokenizer, prompt_messages, add_generation_prompt=True)
     full_text = format_messages(tokenizer, messages, add_generation_prompt=False)
+    assistant_content = messages[-1]["content"]
+    assistant_char_start = full_text.rfind(assistant_content)
+    if assistant_char_start < 0:
+        raise ValueError("Assistant content could not be located in the rendered chat transcript.")
 
-    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     full = tokenizer(
         full_text,
         add_special_tokens=False,
@@ -45,14 +121,28 @@ def tokenize_example(example: dict[str, Any], tokenizer, max_seq_length: int) ->
         max_length=max_seq_length,
     )
 
-    input_ids = full["input_ids"]
+    input_ids = list(full["input_ids"])
+    attention_mask = list(full["attention_mask"])
+    if tokenizer.eos_token_id is not None and (not input_ids or input_ids[-1] != tokenizer.eos_token_id):
+        if len(input_ids) >= max_seq_length:
+            input_ids = input_ids[: max_seq_length - 1]
+            attention_mask = attention_mask[: max_seq_length - 1]
+        input_ids.append(tokenizer.eos_token_id)
+        attention_mask.append(1)
+
+    assistant_ids = tokenizer(assistant_content, add_special_tokens=False)["input_ids"]
+    assistant_start = find_last_subsequence(input_ids, assistant_ids)
+    if assistant_start < 0:
+        prefix_text = full_text[:assistant_char_start]
+        prefix_ids = tokenizer(prefix_text, add_special_tokens=False)["input_ids"]
+        assistant_start = min(len(prefix_ids), len(input_ids))
+
     labels = input_ids.copy()
-    prompt_len = min(len(prompt_ids), len(labels))
-    labels[:prompt_len] = [-100] * prompt_len
+    labels[:assistant_start] = [-100] * assistant_start
 
     return {
         "input_ids": input_ids,
-        "attention_mask": full["attention_mask"],
+        "attention_mask": attention_mask,
         "labels": labels,
     }
 
@@ -86,8 +176,7 @@ def load_jsonl_dataset(train_file: str, val_file: str | None):
     data_files = {"train": train_file}
     if val_file and os.path.isfile(val_file):
         data_files["validation"] = val_file
-    dataset = load_dataset("json", data_files=data_files)
-    return dataset
+    return load_dataset("json", data_files=data_files)
 
 
 def main() -> None:
@@ -108,24 +197,28 @@ def main() -> None:
     parser.add_argument("--logging-steps", type=int, default=5)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--max-steps", type=int, default=-1)
-    parser.add_argument("--bf16", action="store_true", default=True)
-    parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     if not os.path.isfile(args.train_file):
         raise FileNotFoundError(f"Training file not found: {args.train_file}")
 
+    set_seed(args.seed)
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    torch_dtype, use_bf16, use_fp16 = resolve_precision(args.precision)
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        torch_dtype=torch.bfloat16 if args.bf16 and torch.cuda.is_available() else torch.float16,
-        device_map="auto",
+        torch_dtype=torch_dtype,
         trust_remote_code=True,
     )
     model.config.use_cache = False
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.gradient_checkpointing_enable()
+    model.enable_input_require_grads()
 
     peft_config = LoraConfig(
         r=args.lora_r,
@@ -136,6 +229,8 @@ def main() -> None:
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_config)
+    if not any(parameter.requires_grad for parameter in model.parameters()):
+        raise RuntimeError("LoRA adapter has no trainable parameters; check target_modules for this model.")
     model.print_trainable_parameters()
 
     dataset = load_jsonl_dataset(args.train_file, args.val_file)
@@ -143,6 +238,16 @@ def main() -> None:
         lambda example: tokenize_example(example, tokenizer, args.max_seq_length),
         remove_columns=dataset["train"].column_names,
     )
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    plot_paths = ensure_plot_dirs(args.output_dir)
+    with open(os.path.join(args.output_dir, "training_metadata.json"), "w", encoding="utf-8") as handle:
+        json.dump(build_run_metadata(args), handle, indent=2)
+    dataset_profile = {"train": summarize_split(tokenized["train"])}
+    if "validation" in tokenized:
+        dataset_profile["validation"] = summarize_split(tokenized["validation"])
+    with open(plot_paths["dataset"], "w", encoding="utf-8") as handle:
+        json.dump(dataset_profile, handle, indent=2)
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -159,12 +264,16 @@ def main() -> None:
         save_total_limit=2,
         eval_strategy="steps" if "validation" in tokenized else "no",
         eval_steps=args.save_steps if "validation" in tokenized else None,
-        bf16=args.bf16 and torch.cuda.is_available(),
-        fp16=args.fp16 and torch.cuda.is_available(),
+        bf16=use_bf16 and torch.cuda.is_available(),
+        fp16=use_fp16 and torch.cuda.is_available(),
         gradient_checkpointing=True,
-        report_to="none",
+        report_to="tensorboard",
+        logging_dir=os.path.join(args.output_dir, "logs"),
         push_to_hub=bool(args.hub_model_id),
         hub_model_id=args.hub_model_id or None,
+        remove_unused_columns=False,
+        seed=args.seed,
+        data_seed=args.seed,
     )
 
     trainer = Trainer(
@@ -173,16 +282,27 @@ def main() -> None:
         train_dataset=tokenized["train"],
         eval_dataset=tokenized.get("validation"),
         data_collator=SupervisedDataCollator(tokenizer),
+        callbacks=[PlotMetricsCallback(plot_paths)],
     )
 
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
+    trainer.save_state()
+    summary = {
+        "train_rows": len(tokenized["train"]),
+        "validation_rows": len(tokenized["validation"]) if "validation" in tokenized else 0,
+        "final_global_step": trainer.state.global_step,
+        "final_epoch": trainer.state.epoch,
+        "log_history_entries": len(trainer.state.log_history),
+        "best_metric": trainer.state.best_metric,
+        "best_model_checkpoint": trainer.state.best_model_checkpoint,
+    }
+    with open(plot_paths["summary"], "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2)
 
     if args.hub_model_id:
         trainer.push_to_hub()
-        with open(os.path.join(args.output_dir, "training_metadata.json"), "w", encoding="utf-8") as handle:
-            json.dump(vars(args), handle, indent=2)
 
 
 if __name__ == "__main__":

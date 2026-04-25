@@ -1,5 +1,6 @@
 import argparse
 import copy
+import hashlib
 import json
 import os
 import random
@@ -32,6 +33,15 @@ MODERATE_TERMS = [
     "rerouting", "rotating", "backed_up", "stalled", "pressure",
 ]
 INVESTIGATE_PREFIXES = ("investigate_", "check_", "diagnose_", "inspect_", "analyze_", "trace_", "correlate_")
+TOKEN_PATTERN = re.compile(
+    r"\s*("
+    r"\(|\)|\[|\]|,|"
+    r"==|!=|<=|>=|<|>|"
+    r"\bAND\b|\bOR\b|\bNOT\b|\bIN\b|"
+    r"'[^']*'|\"[^\"]*\"|"
+    r"[\w\.%+-]+"
+    r")"
+)
 
 
 def parse_value(value: Any) -> Any:
@@ -66,45 +76,103 @@ def evaluate_condition(state: dict[str, Any], condition: str) -> bool:
     expression = condition.strip()
     if expression in {"1 == 1", "true", "True"}:
         return True
-    if " OR " in expression:
-        return any(evaluate_condition(state, part.strip()) for part in expression.split(" OR "))
-    if " AND " in expression:
-        return all(evaluate_condition(state, part.strip()) for part in expression.split(" AND "))
+    tokens = [match.group(1) for match in TOKEN_PATTERN.finditer(expression)]
+    position = 0
 
-    match = re.match(r"([\w\.]+)\s*(==|!=|<=|>=|<|>|IN)\s*(.+)", expression)
-    if not match:
+    def current_token() -> str | None:
+        return tokens[position] if position < len(tokens) else None
+
+    def consume(expected: str | None = None) -> str:
+        nonlocal position
+        token = current_token()
+        if token is None:
+            raise ValueError("Unexpected end of condition.")
+        if expected is not None and token != expected:
+            raise ValueError(f"Expected {expected}, found {token}.")
+        position += 1
+        return token
+
+    def parse_value_token(token: str) -> Any:
+        if token.startswith(("'", '"')) and token.endswith(("'", '"')):
+            return token[1:-1]
+        return parse_value(token)
+
+    def compare(current_value: Any, operator: str, target_value: Any) -> bool:
+        current_value = parse_value(current_value)
+        if operator == "IN":
+            return current_value in target_value
+        if operator == "==":
+            return str(current_value).lower() == str(target_value).lower()
+        if operator == "!=":
+            return str(current_value).lower() != str(target_value).lower()
+        try:
+            left = float(current_value)
+            right = float(target_value)
+        except (TypeError, ValueError):
+            return False
+        if operator == "<=":
+            return left <= right
+        if operator == ">=":
+            return left >= right
+        if operator == "<":
+            return left < right
+        if operator == ">":
+            return left > right
         return False
-    key, operator, raw_target = match.groups()
-    current = get_nested(state, key)
-    if current is None:
-        return False
 
-    current_value = parse_value(current)
-    if operator == "IN":
-        candidates = [parse_value(item.strip().strip("[]'\"")) for item in raw_target.split(",")]
-        return current_value in candidates
+    def parse_list() -> list[Any]:
+        consume("[")
+        values = []
+        while current_token() != "]":
+            values.append(parse_value_token(consume()))
+            if current_token() == ",":
+                consume(",")
+        consume("]")
+        return values
 
-    target_value = parse_value(raw_target)
-    if operator == "==":
-        return str(current_value).lower() == str(target_value).lower()
-    if operator == "!=":
-        return str(current_value).lower() != str(target_value).lower()
+    def parse_predicate() -> bool:
+        if current_token() == "(":
+            consume("(")
+            value = parse_or()
+            consume(")")
+            return value
+
+        key = consume()
+        operator = consume()
+        if operator == "IN":
+            target_value = parse_list()
+        else:
+            target_value = parse_value_token(consume())
+        current = get_nested(state, key)
+        if current is None:
+            return False
+        return compare(current, operator, target_value)
+
+    def parse_not() -> bool:
+        if current_token() == "NOT":
+            consume("NOT")
+            return not parse_not()
+        return parse_predicate()
+
+    def parse_and() -> bool:
+        value = parse_not()
+        while current_token() == "AND":
+            consume("AND")
+            value = value and parse_not()
+        return value
+
+    def parse_or() -> bool:
+        value = parse_and()
+        while current_token() == "OR":
+            consume("OR")
+            value = value or parse_and()
+        return value
 
     try:
-        left = float(current_value)
-        right = float(target_value)
-    except (TypeError, ValueError):
+        result = parse_or()
+    except ValueError:
         return False
-
-    if operator == "<=":
-        return left <= right
-    if operator == ">=":
-        return left >= right
-    if operator == "<":
-        return left < right
-    if operator == ">":
-        return left > right
-    return False
+    return result and current_token() is None
 
 
 def apply_effects(state: dict[str, Any], effects: dict[str, Any]) -> None:
@@ -119,7 +187,9 @@ def apply_effects(state: dict[str, Any], effects: dict[str, Any]) -> None:
         target_key = parts[-1]
         if isinstance(effect, str) and effect[:1] in {"+", "-"} and effect[1:].replace(".", "").isdigit():
             previous = parse_value(current.get(target_key, 0))
-            previous_number = float(previous) if isinstance(previous, (int, float)) else 0.0
+            if not isinstance(previous, (int, float)):
+                raise TypeError(f"Cannot apply numeric effect {effect} to non-numeric state '{key}'={previous!r}")
+            previous_number = float(previous)
             delta = float(effect[1:])
             current[target_key] = max(0.0, previous_number - delta) if effect[0] == "-" else previous_number + delta
         else:
@@ -138,12 +208,17 @@ def flatten_state(state: dict[str, Any], prefix: str = "") -> dict[str, Any]:
 
 
 def detect_anomalies(state: dict[str, Any]) -> list[tuple[str, Any, str]]:
+    def contains_term(text: str, term: str) -> bool:
+        normalized_text = re.sub(r"[_\-]+", " ", text.lower())
+        normalized_term = re.sub(r"[_\-]+", " ", term.lower())
+        return bool(re.search(rf"\b{re.escape(normalized_term)}\b", normalized_text))
+
     anomalies = []
     for key, value in flatten_state(state).items():
         text = str(value).lower()
-        if any(term in text for term in CRITICAL_TERMS):
+        if any(contains_term(text, term) for term in CRITICAL_TERMS):
             anomalies.append((key, value, "CRITICAL"))
-        elif any(term in text for term in MODERATE_TERMS):
+        elif any(contains_term(text, term) for term in MODERATE_TERMS):
             anomalies.append((key, value, "DEGRADED"))
     return anomalies
 
@@ -299,13 +374,7 @@ def build_analysis(state: dict[str, Any], scenario: dict[str, Any], step_idx: in
 
 
 def compute_confidence(step_idx: int, completed: list[str], completed_rewards: list[float], candidate: dict[str, str] | None) -> float:
-    confidence = 0.52 + min(0.18, 0.04 * len([action for action in completed if action.startswith(INVESTIGATE_PREFIXES)]))
-    confidence += min(0.15, 0.03 * len([reward for reward in completed_rewards if reward > 0]))
-    if candidate:
-        confidence += 0.08
-    if step_idx == 1:
-        confidence = min(confidence, 0.62)
-    return round(min(0.94, confidence), 2)
+    return 0.7
 
 
 def build_reasoning(
@@ -483,6 +552,17 @@ def load_scenarios(path: str) -> list[dict[str, Any]]:
     return scenarios
 
 
+def compute_file_hash(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build SFT and GRPO datasets for OpsSim-AI.")
     parser.add_argument("--input", default="tasks/cascade.json")
@@ -527,6 +607,8 @@ def main() -> None:
         "val_scenarios": [scenario.get("scenario_id", "unknown") for scenario in val_scenarios],
         "max_contrast_per_step": args.max_contrast_per_step,
         "seed": args.seed,
+        "input_path": args.input,
+        "input_sha256": compute_file_hash(args.input),
     }
     os.makedirs(args.output_dir, exist_ok=True)
     with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as handle:

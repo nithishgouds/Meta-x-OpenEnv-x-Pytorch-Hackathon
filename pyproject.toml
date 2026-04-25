@@ -14,12 +14,13 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "torch",
-    "transformers>=5.2.0",
-    "trl>=1.2.0",
-    "datasets",
-    "peft",
-    "accelerate",
-    "jmespath"
+    "transformers==4.51.3",
+    "trl==0.17.0",
+    "datasets==3.5.0",
+    "peft==0.15.2",
+    "accelerate==1.6.0",
+    "jmespath",
+    "matplotlib==3.9.2"
 ]
 
 [build-system]

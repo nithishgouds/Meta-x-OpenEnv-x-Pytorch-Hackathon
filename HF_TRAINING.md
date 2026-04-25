@@ -1,85 +1,109 @@
-# HF-Only SFT + GRPO Runbook
+# HF Training Runbook
 
-This runbook keeps `env.py` and `multi_agent.py` unchanged. The training flow is:
+This is the canonical Hugging Face Jobs flow for the current `sandeep` branch.
 
-1. Generate SFT/GRPO data from `tasks/cascade.json`.
-2. SFT `Qwen/Qwen2.5-1.5B-Instruct` with LoRA.
-3. Run a short GRPO refinement from the SFT adapter.
-4. Push adapters to Hugging Face Hub before the job exits.
+## Assumptions
 
-## Budget Target
+- GPU target: `L4 24GB`
+- Base model default: `Qwen/Qwen2.5-1.5B-Instruct`
+- Seed default: `42`
+- Training dependencies are pinned in `pyproject.toml` and `requirements.txt`
+- The submitter clones branch `sandeep` unless overridden with `--branch`
 
-Use one `L4 24GB` job where possible. For a `$10` ceiling:
+## Required Secrets
 
-- Smoke/data generation: `$1-2`
-- SFT: `$4-5`
-- GRPO: `$2-3`
-- Eval/rerun buffer: `$1`
+- `HF_TOKEN`: read/write token for model repos
+- `HF_USER`: your HF username or org
 
-Stop early if setup burns more than `$2`, SFT cannot emit valid JSON, or GRPO reward is flat.
+Optional environment overrides:
 
-## Required Inputs
+- `MODEL`
+- `REPO_URL`
+- `REPO_BRANCH`
 
-Set these as HF Job secrets/env vars, not in git:
+## Recommended Flow
 
-- `HF_TOKEN`: token with read/write access to your account.
-- `HF_USER`: your Hugging Face username or org.
+Use the Python submitter rather than raw `hf jobs run` quoting.
 
-Choose repo names:
-
-- SFT adapter: `$HF_USER/opssim-qwen25-1p5b-sft-lora`
-- GRPO adapter: `$HF_USER/opssim-qwen25-1p5b-grpo-lora`
-
-## One-Shot Budget Command
-
-Preferred: use the Python submitter instead of raw CLI quoting:
+Smoke:
 
 ```powershell
 $env:HF_TOKEN = Read-Host "Paste HF token"
+$env:HF_USER = "your-hf-user"
 python submit_hf_job.py smoke
 ```
 
-If the smoke job succeeds:
+SFT:
 
 ```powershell
 python submit_hf_job.py sft
+```
+
+GRPO:
+
+```powershell
 python submit_hf_job.py grpo
 ```
 
-The script prints a job URL. Open that URL in the browser for logs/status instead of repeatedly polling the CLI.
-
-Raw CLI equivalent, if needed:
+Combined run, only if you are comfortable with a longer job:
 
 ```powershell
-hf jobs run --flavor l4x1 --timeout 2h --secrets HF_TOKEN `
-  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && python train_sft.py --model Qwen/Qwen2.5-1.5B-Instruct --train-file data/generated/sft_train.jsonl --val-file data/generated/sft_val.jsonl --output-dir outputs/sft-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-sft-lora --epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536 --save-steps 50 && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --input tasks/cascade.json --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
+python submit_hf_job.py all
 ```
 
-## Safer Two-Stage Commands
+## What Each Stage Does
 
-If you want a hard checkpoint between SFT and GRPO, run SFT first:
+- `smoke`
+  - generates `data/generated/*`
+  - runs a very short SFT job
+- `sft`
+  - regenerates datasets
+  - trains the LoRA SFT adapter
+  - writes `outputs/sft-qwen2.5-1.5b/training_metadata.json`
+- `grpo`
+  - regenerates datasets
+  - reads `data/generated/grpo_prompts.jsonl`
+  - trains GRPO with:
+    - `batch-size=2`
+    - `num-generations=2`
+    - `max-completion-length=512`
+    - `max-prompt-length=1536`
+  - writes:
+    - `outputs/grpo-qwen2.5-1.5b/run_meta.json`
+    - `outputs/grpo-qwen2.5-1.5b/metrics.json`
 
-```powershell
-hf jobs run --flavor l4x1 --timeout 1h --secrets HF_TOKEN `
-  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && python train_sft.py --model Qwen/Qwen2.5-1.5B-Instruct --train-file data/generated/sft_train.jsonl --val-file data/generated/sft_val.jsonl --output-dir outputs/sft-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-sft-lora --epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536'
-```
+## Reproducibility
 
-Then run the short GRPO job:
+- SFT and GRPO both accept `--seed`
+- Run metadata records:
+  - CLI args
+  - git SHA
+  - dataset hash
+  - prompt-file hash where applicable
 
-```powershell
-hf jobs run --flavor l4x1 --timeout 1h --secrets HF_TOKEN `
-  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --input tasks/cascade.json --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
-```
+## Evaluation
 
-## Output Locations
+After training, verify:
 
-- Ephemeral HF job disk:
-  - `data/generated/sft_train.jsonl`
-  - `data/generated/sft_val.jsonl`
-  - `data/generated/grpo_prompts.jsonl`
-  - `outputs/...`
-- Persistent HF Hub:
-  - SFT LoRA adapter repo
-  - GRPO LoRA adapter repo
+1. the adapter loads with `PeftModel.from_pretrained(...)`
+2. SFT emits valid JSON with the required keys
+3. GRPO metrics show non-flat `valid_json_rate` and `accuracy`
+4. downstream eval artifacts in `eval_results/` still look healthy
 
-If an artifact is not pushed to Hub, assume it can disappear when the job ends.
+## Failure Modes
+
+- `push_to_hub` 401:
+  - verify `HF_TOKEN`
+  - confirm repo namespace and write access
+- OOM:
+  - reduce `--max-prompt-length`
+  - reduce `--max-completion-length`
+  - reduce `--grad-accum` or training length
+- Missing adapter during GRPO:
+  - prefer running `sft` and `grpo` as separate jobs
+- Dependency mismatch:
+  - reinstall from pinned `requirements.txt`
+
+## Rollback
+
+If a pushed adapter is bad, revert by changing the Hub revision you consume, or delete the faulty repo/version with the Hugging Face CLI or web UI.
