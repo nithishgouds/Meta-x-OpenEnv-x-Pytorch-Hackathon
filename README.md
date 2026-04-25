@@ -12,7 +12,7 @@ tags:
 
 # OpsSim-AI: Distributed War Room (9-Agent Cascading Failure System)
 
-Production incidents rarely fail in one clean place.
+Real production failures rarely stay inside one component.
 
 A checkout outage might begin as a Redis failure, spread into payment timeouts, leave stale database connections behind, and tempt an agent into restarting the wrong service too early. OpsSim-AI turns that kind of messy incident into a structured multi-agent environment: agents see only their own slice of the system, communicate through a shared war-room channel, and are rewarded for diagnosing, sequencing, delegating, and recovering correctly.
 
@@ -190,6 +190,32 @@ This environment is interesting because it combines:
 
 That makes it a compact testbed for studying whether LLM agents can move from "answering correctly" toward operating responsibly in a simulated production system.
 
+## Why This Project Fits the Hackathon Themes
+
+### Theme #1 – Multi-Agent Interactions
+
+- Seven specialist agents observe different parts of the system, so no single agent has the full answer.
+- The Incident Commander coordinates through a shared war-room channel, then delegates actions to the right domain owner.
+- The Supervisor adds an oversight layer by checking whether directives are safe before execution.
+
+### Theme #2 – Long-Horizon Planning
+
+- Incidents require ordered recovery: investigate symptoms, identify root cause, satisfy preconditions, then remediate.
+- Rewards are delayed because early diagnostic steps may only pay off after later fixes restore SLA health.
+- The environment tracks history, progress, failed actions, and stagnation so agents must recover from mistakes.
+
+### Theme #3 – World Modeling (Professional Tasks)
+
+- The environment simulates realistic production systems with application, infrastructure, database, network, security, middleware, and observability state.
+- Agents operate under partial observability, matching how real incident teams only see the signals available to their role.
+- Success depends on causal reasoning: agents must connect upstream failures to downstream symptoms instead of chasing surface alerts.
+
+### Theme #4 – Self-Improvement
+
+- The reward function breaks behavior into interpretable feedback signals such as sequencing, delegation, safety, and communication cost.
+- `generate_sft_dataset.py` and `train.py` support improvement loops by turning scenarios and reward-guided behavior into data for supervised or RL-style training.
+- Evaluation traces can show where an agent stalls, repeats bad actions, or delegates incorrectly, making failures easier to learn from.
+
 ## Project Structure
 
 ```
@@ -236,10 +262,6 @@ python server/app.py
 
 ## What Was Improved
 
-- Strengthened the opening hook so reviewers immediately understand the incident-response problem.
-- Clarified the specific capability gap: partial observability, wrong-domain actions, unsafe shortcuts, and long-horizon recovery.
-- Added an intuitive environment mental model explaining what agents see, what they do, and how recovery unfolds.
-- Preserved the existing architecture, reward equation, training command, usage commands, and technical claims.
-- Improved readability by adding smoother transitions and short explanatory paragraphs around existing tables.
-- Fixed broken encoding artifacts in symbols, tree formatting, and punctuation.
-- Added a concise "Why It Matters" section to connect the environment to real-world agent reliability and research value.
+- Replaced the confusing opening line with a simpler sentence about failures spreading across components.
+- Added a short hackathon-theme alignment section focused on multi-agent interaction, long-horizon planning, professional world modeling, and applicable self-improvement loops.
+- Kept the edits targeted and left the existing technical, training, reward, and usage content intact.
