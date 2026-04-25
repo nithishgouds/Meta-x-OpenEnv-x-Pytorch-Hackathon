@@ -705,6 +705,14 @@ def _run_episode_core(room):
             )
             valid, reason = _validate_llm_decision(decision, room.env, memory, obs_actions)
             if valid:
+                supervisor_approved = room.supervisor.evaluate(
+                    {"action": decision.get("action", "")},
+                    room.env.state_data.get("penalties", {}),
+                )
+                if not supervisor_approved:
+                    valid = False
+                    reason = "supervisor_rejected_harmful"
+            if valid:
                 break
             last_invalid_reason = reason
             chosen = decision.get("action", "") or "<none>"
@@ -768,7 +776,11 @@ def _run_episode_core(room):
         if reasoning:
             print(f"[REASONING] {reasoning[:200]}")
 
-        supervisor_approved = True
+        supervisor_approved = room.supervisor.evaluate(
+            {"action": action_str},
+            room.env.state_data.get("penalties", {}),
+        )
+        print(f"[SUPERVISOR] action={action_str} approved={supervisor_approved}")
 
         result = room.execute_directive(target_agent, action_str, supervisor_approved)
         reward_val = result["reward"].value
