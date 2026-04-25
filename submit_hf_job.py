@@ -18,6 +18,7 @@ def sanitize_tag(value: str) -> str:
 
 def shell_prelude(repo_url: str, branch: str) -> str:
     return (
+        "(command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)) && "
         f"git clone --branch {branch} {repo_url} app && "
         "cd app && "
         "pip install -U pip && "
