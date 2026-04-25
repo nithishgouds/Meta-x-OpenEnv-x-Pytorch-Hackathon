@@ -52,7 +52,7 @@ Raw CLI equivalent, if needed:
 
 ```powershell
 hf jobs run --flavor l4x1 --timeout 2h --secrets HF_TOKEN `
-  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && python train_sft.py --model Qwen/Qwen2.5-1.5B-Instruct --train-file data/generated/sft_train.jsonl --val-file data/generated/sft_val.jsonl --output-dir outputs/sft-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-sft-lora --epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536 --save-steps 50 && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
+  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && python train_sft.py --model Qwen/Qwen2.5-1.5B-Instruct --train-file data/generated/sft_train.jsonl --val-file data/generated/sft_val.jsonl --output-dir outputs/sft-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-sft-lora --epochs 1 --batch-size 1 --grad-accum 8 --max-seq-length 1536 --save-steps 50 && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --input tasks/cascade.json --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
 ```
 
 ## Safer Two-Stage Commands
@@ -68,7 +68,7 @@ Then run the short GRPO job:
 
 ```powershell
 hf jobs run --flavor l4x1 --timeout 1h --secrets HF_TOKEN `
-  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
+  pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel -- bash -lc 'git clone --branch sandeep https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git app && cd app && pip install -U pip && pip install -e . && python train_grpo.py --model Qwen/Qwen2.5-1.5B-Instruct --sft-adapter meancodi/opssim-qwen25-1p5b-sft-lora --input tasks/cascade.json --output-dir outputs/grpo-qwen2.5-1.5b --hub-model-id meancodi/opssim-qwen25-1p5b-grpo-lora --max-steps 100 --batch-size 1 --grad-accum 4 --num-generations 2 --max-completion-length 256'
 ```
 
 ## Output Locations
