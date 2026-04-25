@@ -260,8 +260,4 @@ python server/app.py
 - Venkatesh
 - Nithish
 
-## What Was Improved
 
-- Replaced the confusing opening line with a simpler sentence about failures spreading across components.
-- Added a short hackathon-theme alignment section focused on multi-agent interaction, long-horizon planning, professional world modeling, and applicable self-improvement loops.
-- Kept the edits targeted and left the existing technical, training, reward, and usage content intact.
