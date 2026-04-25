@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from datasets import load_dataset
+from huggingface_hub import HfApi
 from peft import LoraConfig, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
@@ -279,7 +280,7 @@ def main() -> None:
         fp16=use_fp16 and torch.cuda.is_available(),
         gradient_checkpointing=True,
         report_to="none",
-        push_to_hub=bool(args.hub_model_id),
+        push_to_hub=False,
         hub_model_id=args.hub_model_id or None,
         remove_unused_columns=False,
         seed=args.seed,
@@ -325,7 +326,32 @@ def main() -> None:
     auto_generate_plots(args.output_dir, stage="sft")
 
     if args.hub_model_id:
-        trainer.push_to_hub()
+        # Use HfApi.upload_folder directly for full control over which files
+        # are uploaded. Avoids LFS pointer errors from train.log / large files.
+        api = HfApi()
+        api.create_repo(repo_id=args.hub_model_id, exist_ok=True)
+        api.upload_folder(
+            repo_id=args.hub_model_id,
+            folder_path=args.output_dir,
+            allow_patterns=[
+                "*.safetensors",
+                "*.json",
+                "*.txt",
+                "*.model",
+                "*.py",
+                "*.md",
+                "*.png",
+            ],
+            ignore_patterns=[
+                "checkpoint-*",
+                "_*",
+                "*.log",
+                "*.jsonl",
+                "plot_data/*",
+                "train.log",
+            ],
+            commit_message="Upload SFT adapter",
+        )
 
 
 if __name__ == "__main__":

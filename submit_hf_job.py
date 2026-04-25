@@ -80,12 +80,10 @@ def sft_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
 
 def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
     paths = stage_paths(model, hf_user)
-    # Env-grounded GRPO defaults: with batch_size=4 and num_generations=4 the
-    # trainer batches all four generations per prompt into a single model.generate
-    # call (no per-completion overhead). Effective batch = 4 * grad_accum 2 = 8
-    # unique prompts per step / 4 generations = 2 prompts per optimizer step.
-    # 300 steps * 8 generations = 2400 completions, comfortably within $25 on
-    # an A100-large at ~$2.50/h.
+    # Env-grounded GRPO: batch_size=8, num_generations=8 gives 1 prompt per
+    # micro-batch with 8 completions for richer GRPO advantages. With
+    # grad_accum=2, each optimizer step sees 2 prompts. lr=1e-5 and beta=0.01
+    # allow meaningful policy updates (prior runs had KL≈0.0008 = frozen).
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
@@ -95,9 +93,9 @@ def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 250 --batch-size 4 --grad-accum 2 "
-        "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
-        "--learning-rate 2e-6 --beta 0.05"
+        "--max-steps 250 --batch-size 8 --grad-accum 2 "
+        "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
+        "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
     )
 
 
@@ -119,9 +117,9 @@ def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> st
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 250 --batch-size 4 --grad-accum 2 "
-        "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
-        "--learning-rate 2e-6 --beta 0.05"
+        "--max-steps 250 --batch-size 8 --grad-accum 2 "
+        "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
+        "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
     )
 
 
@@ -135,8 +133,8 @@ def get_token() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Submit OpsSim-AI training jobs to Hugging Face Jobs.")
     parser.add_argument("stage", choices=["smoke", "sft", "grpo", "all"])
-    # a100-large = 80GB A100 at ~$2.50/h. Required for 3B + frozen reference
-    # + bf16 activations under GRPO with batch=4 and num_generations=4.
+    # a100-large = 80GB A100 at ~$2.50/h. Required for 1.5B/3B + frozen reference
+    # + bf16 activations under GRPO with batch=8 and num_generations=8.
     parser.add_argument("--flavor", default="l40sx1")
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--namespace", default=os.environ.get("HF_USER", "meancodi"))

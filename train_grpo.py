@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 from datasets import Dataset
+from huggingface_hub import HfApi
 from peft import LoraConfig, PeftModel
 from torch.utils.data import SequentialSampler
 from transformers import AutoModelForCausalLM, TrainerCallback, set_seed
@@ -411,34 +412,62 @@ class EnvScorer:
             return -1.0, {}, {"valid": False, "stepped": False}
 
         raw = float(getattr(reward, "value", 0.0))
-        mn, mx = self.norm.get(scenario_id, (-5.0, 5.0))
-        # The min/max from inference.py are FULL-EPISODE ranges (max_steps
-        # accumulated). For a single env step we need to rescale by max_steps
-        # so the per-step signal isn't squashed to a thin slice of [-1, 1].
-        # This keeps cross-scenario equalization (different scenarios still
-        # share a comparable per-step half-range) while giving GRPO enough
-        # spread between good and bad single-step actions to learn from.
-        half_full = max((mx - mn) / 2.0, 1.0)
-        half_per_step = max(half_full / max(self.max_steps, 1), 0.5)
-        norm = max(-1.5, min(1.5, raw / half_per_step))
+
+        # ---- Controllable reward only -----------------------------------
+        # We keep ONLY components the model's action choice directly
+        # influences. Uncontrollable penalties (urgency, bleed, stagnation,
+        # observability, supervisor, communication) are stripped.
+        #
+        # responsibility_penalty is handled specially: the env returns -5.0
+        # and terminates the episode when the wrong domain-agent executes an
+        # action. Including it in the controllable sum creates a binary cliff
+        # at -1.5 that gives NO gradient information about WHICH agent is
+        # correct.  Instead, responsibility violations receive a fixed
+        # moderate penalty (-0.5). The coordination_reward signal (+0.15
+        # for correct agent, -0.1 for wrong) provides smooth gradients for
+        # learning domain-agent routing in non-terminating steps.
+        action_quality = float(getattr(reward, "action_quality", 0.0))
+        sequencing_reward = float(getattr(reward, "sequencing_reward", 0.0))
+        coordination_reward = float(getattr(reward, "coordination_reward", 0.0))
+        success_reward_val = float(getattr(reward, "success_reward", 0.0))
+        delta_health = float(getattr(reward, "delta_health", 0.0))
+        conflict_penalty = float(getattr(reward, "conflict_penalty", 0.0))
+        responsibility_penalty = float(getattr(reward, "responsibility_penalty", 0.0))
+
+        # Responsibility violation: episode terminated, all other components
+        # are zero.  Give a fixed moderate penalty instead of the -5.0 cliff.
+        controllable = (
+            action_quality
+            + sequencing_reward
+            + coordination_reward
+            + success_reward_val
+            + delta_health
+            + conflict_penalty
+        )
+        if responsibility_penalty < -1.0:
+            norm = -0.5
+        else:
+            norm = max(-1.0, min(1.5, controllable))
 
         components = {
             "value_raw": raw,
-            "action_quality": float(getattr(reward, "action_quality", 0.0)),
-            "sequencing_reward": float(getattr(reward, "sequencing_reward", 0.0)),
-            "coordination_reward": float(getattr(reward, "coordination_reward", 0.0)),
-            "success_reward": float(getattr(reward, "success_reward", 0.0)),
+            "controllable": controllable,
+            "action_quality": action_quality,
+            "sequencing_reward": sequencing_reward,
+            "coordination_reward": coordination_reward,
+            "success_reward": success_reward_val,
             "global_bleed": float(getattr(reward, "global_bleed", 0.0)),
-            "responsibility_penalty": float(getattr(reward, "responsibility_penalty", 0.0)),
+            "responsibility_penalty": responsibility_penalty,
+            "conflict_penalty": conflict_penalty,
             "urgency_penalty": float(getattr(reward, "urgency_penalty", 0.0)),
-            "delta_health": float(getattr(reward, "delta_health", 0.0)),
+            "delta_health": delta_health,
         }
         flags = {
             "valid": True,
             "stepped": True,
             "done": bool(done),
-            "success": float(getattr(reward, "success_reward", 0.0)) > 0.0,
-            "sla_fail": float(getattr(reward, "success_reward", 0.0)) < 0.0,
+            "success": success_reward_val > 0.0,
+            "sla_fail": success_reward_val < 0.0,
         }
         return norm, components, flags
 
@@ -448,19 +477,17 @@ class EnvScorer:
 # ---------------------------------------------------------------------------
 #
 # Reward decomposition (all components are added by GRPOTrainer):
-#   env_reward          : main signal in roughly [-1.5, +1.5], normalized per
-#                         scenario so easy and hard scenarios contribute on
-#                         comparable scale.
-#   parse_penalty       : -1.0 if completion is not valid JSON, else 0.0.
-#                         Schema is already solved by SFT, so we no longer pay
-#                         a saturated bonus for valid JSON; we only punish
-#                         regression.
+#   env_reward          : main signal in [-1.0, +1.5]. Uses ONLY controllable
+#                         components (action_quality, sequencing, coordination,
+#                         success, delta_health, conflict). Responsibility
+#                         violations get a fixed -0.5 instead of the env's
+#                         catastrophic -5.0 cliff. Unparsable completions
+#                         receive -0.3 (not 0) to penalise bad JSON.
+#   parse_penalty       : -0.5 if completion is not valid JSON, else 0.0.
 #   format_penalty      : -0.25 if required keys are missing, else 0.0.
-#   unsafe_penalty      : -1.0 if predicted action is in the dataset's unsafe
-#                         set (kept as an extra strict guardrail on top of
-#                         whatever the env already says about the action).
-# Total reward range ~ [-3.75, +1.5]. Decision quality (env signal) dominates
-# the upside; safety/format dominate the downside.
+# Total reward range ~ [-1.75, +1.5]. Decision quality (env signal) dominates
+# the upside; parse/format guard the downside. No external unsafe_penalty —
+# the env already penalises bad actions via action_quality.
 
 REQUIRED_KEYS = {"analysis", "plan", "next_action", "target_agent", "reasoning", "confidence"}
 
@@ -490,7 +517,10 @@ def env_reward(completions, scenario_id, step_idx, gold_action, gold_target_agen
     ):
         quality["n"] += 1
         if payload is None:
-            rewards.append(0.0)  # parse penalty applied separately; env signal is 0 if unparsable
+            # Unparsable completions get a moderate negative signal so they
+            # score worse than valid-but-wrong actions (~-0.2) but not so
+            # harsh that they dominate the GRPO advantage over action quality.
+            rewards.append(-0.3)
             raw_scores.append(0.0)
             continue
         quality["valid_json"] += 1
@@ -551,7 +581,7 @@ def env_reward(completions, scenario_id, step_idx, gold_action, gold_target_agen
 
 
 def parse_penalty(completions, **_kwargs):
-    rewards = [0.0 if payload is not None else -1.0 for payload in payloads_from_completions(completions)]
+    rewards = [0.0 if payload is not None else -0.5 for payload in payloads_from_completions(completions)]
     update_reward_snapshot("parse_penalty", rewards)
     return rewards
 
@@ -574,7 +604,10 @@ def unsafe_penalty(completions, unsafe_actions, **_kwargs):
             rewards.append(0.0)
             continue
         pred = str(payload.get("next_action", ""))
-        rewards.append(-1.0 if pred in set(unsafe or []) else 0.0)
+        # Reduced from -1.0 to -0.5: the env already penalises bad actions
+        # via action_quality, so -1.0 double-counted and was too punitive
+        # relative to the positive side of the reward range (~+0.6).
+        rewards.append(-0.5 if pred in set(unsafe or []) else 0.0)
     update_reward_snapshot("unsafe_penalty", rewards)
     return rewards
 
@@ -660,13 +693,13 @@ def main() -> None:
     parser.add_argument("--hub-model-id", default="", help="Optional HF Hub repo id for pushing the GRPO adapter.")
     parser.add_argument("--max-steps", type=int, default=300)
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--grad-accum", type=int, default=2)
-    parser.add_argument("--num-generations", type=int, default=4)
+    parser.add_argument("--num-generations", type=int, default=8)
     parser.add_argument("--max-completion-length", type=int, default=384)
     parser.add_argument("--max-prompt-length", type=int, default=1536)
-    parser.add_argument("--learning-rate", type=float, default=2e-6)
-    parser.add_argument("--beta", type=float, default=0.05,
+    parser.add_argument("--learning-rate", type=float, default=1e-5)
+    parser.add_argument("--beta", type=float, default=0.01,
                         help="KL coefficient anchoring the policy to the SFT reference.")
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=100)
@@ -679,6 +712,8 @@ def main() -> None:
     parser.add_argument("--curriculum", action="store_true", default=True,
                         help="Order the dataset easy->medium->all (on by default).")
     parser.add_argument("--no-curriculum", dest="curriculum", action="store_false")
+    parser.add_argument("--temperature", type=float, default=0.9,
+                        help="Sampling temperature for GRPO generation (higher = more exploration).")
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -734,6 +769,7 @@ def main() -> None:
         max_prompt_length=args.max_prompt_length,
         learning_rate=args.learning_rate,
         beta=args.beta,
+        temperature=args.temperature,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=2,
@@ -742,7 +778,7 @@ def main() -> None:
         fp16=args.precision == "fp16" and torch.cuda.is_available(),
         gradient_checkpointing=True,
         report_to="none",
-        push_to_hub=bool(args.hub_model_id),
+        push_to_hub=False,
         hub_model_id=args.hub_model_id or None,
         seed=args.seed,
     )
@@ -756,7 +792,6 @@ def main() -> None:
             env_reward,
             parse_penalty,
             format_penalty,
-            unsafe_penalty,
         ],
         peft_config=peft_config,
         callbacks=[GRPOPlotMetricsCallback(plot_paths)],
@@ -810,7 +845,39 @@ def main() -> None:
     auto_generate_plots(args.output_dir, stage="grpo")
 
     if args.hub_model_id:
-        trainer.push_to_hub()
+        # Use HfApi.upload_folder directly instead of trainer.push_to_hub()
+        # to get full control over which files are uploaded. The previous
+        # approach (writing .gitignore + trainer.push_to_hub) was fragile:
+        #   - trainer.push_to_hub uses upload_folder with only
+        #     ignore_patterns=["_*", "checkpoint-*"]
+        #   - .gitignore support depends on huggingface_hub version
+        #   - train.log gets LFS-tracked and causes "LFS pointer pointed
+        #     to a file that does not exist" errors
+        # With explicit allow_patterns we upload ONLY model artifacts.
+        api = HfApi()
+        api.create_repo(repo_id=args.hub_model_id, exist_ok=True)
+        api.upload_folder(
+            repo_id=args.hub_model_id,
+            folder_path=args.output_dir,
+            allow_patterns=[
+                "*.safetensors",
+                "*.json",
+                "*.txt",       # tokenizer files
+                "*.model",     # sentencepiece
+                "*.py",        # custom code
+                "*.md",
+                "*.png",       # training plots
+            ],
+            ignore_patterns=[
+                "checkpoint-*",
+                "_*",
+                "*.log",
+                "*.jsonl",
+                "plot_data/*",
+                "train.log",
+            ],
+            commit_message="Upload GRPO adapter (env-grounded reward)",
+        )
 
 
 if __name__ == "__main__":
