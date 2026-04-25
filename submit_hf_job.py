@@ -95,7 +95,7 @@ def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 300 --batch-size 4 --grad-accum 2 "
+        "--max-steps 250 --batch-size 4 --grad-accum 2 "
         "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
         "--learning-rate 2e-6 --beta 0.05"
     )
@@ -119,7 +119,7 @@ def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> st
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 300 --batch-size 4 --grad-accum 2 "
+        "--max-steps 250 --batch-size 4 --grad-accum 2 "
         "--num-generations 4 --max-completion-length 384 --max-prompt-length 1536 "
         "--learning-rate 2e-6 --beta 0.05"
     )
@@ -141,7 +141,7 @@ def main() -> None:
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--namespace", default=os.environ.get("HF_USER", "meancodi"))
     parser.add_argument("--hf-user", default=os.environ.get("HF_USER", "meancodi"))
-    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-3B-Instruct"))
+    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-1.5B-Instruct"))
     parser.add_argument("--repo-url", default=os.environ.get("REPO_URL", "https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git"))
     parser.add_argument("--branch", default=os.environ.get("REPO_BRANCH", "sandeep"))
     parser.add_argument("--dry-run", action="store_true")
