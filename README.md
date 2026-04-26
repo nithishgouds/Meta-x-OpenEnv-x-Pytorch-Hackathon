@@ -1,3 +1,18 @@
+---
+title: OpsSim-AI
+emoji: 🚨
+colorFrom: red
+colorTo: gray
+sdk: gradio
+sdk_version: 5.0.0
+app_file: app.py
+pinned: false
+tags:
+  - openenv
+  - reinforcement-learning
+  - multi-agent
+---
+
 # OpsSim-AI: Teaching LLMs to Run a Production War Room
 
 When a checkout system starts throwing 500 errors at 2 AM, the cause is rarely obvious. A Redis cache failure may be triggering payment timeouts, which leave stale database connections, which make it tempting to restart the wrong service too early — making everything worse.
