@@ -10,254 +10,445 @@ tags:
   - openenv
 ---
 
-# OpsSim-AI: Distributed War Room (9-Agent Cascading Failure System)
+# OpsSim-AI: Teaching LLMs to Run a Production War Room
 
-Real production failures rarely stay inside one component.
+When a checkout system starts throwing 500 errors at 2 AM, the cause is rarely obvious. A Redis cache failure may be triggering payment timeouts, which leave stale database connections, which make it tempting to restart the wrong service too early — making everything worse.
 
-A checkout outage might begin as a Redis failure, spread into payment timeouts, leave stale database connections behind, and tempt an agent into restarting the wrong service too early. OpsSim-AI turns that kind of messy incident into a structured multi-agent environment: agents see only their own slice of the system, communicate through a shared war-room channel, and are rewarded for diagnosing, sequencing, delegating, and recovering correctly.
+Real incident response requires a team of specialists who each see only part of the picture, must communicate findings, coordinate actions in the right order, and resist the urge to take dangerous shortcuts.
 
-The goal is not just to pick the right action. The goal is to behave like a reliable incident team under uncertainty: investigate first, identify the root cause, coordinate across domains, avoid unsafe shortcuts, and restore SLA health before the cascade gets worse.
+**OpsSim-AI** is an environment that turns this kind of messy, multi-team incident into a structured training ground for LLM agents.
 
-## Overview
+---
 
-OpsSim-AI is an OpenEnv-compatible 9-agent environment simulating cascading production failures resolved through a distributed war room with partial observability, strict responsibility enforcement, and a mathematically rigorous reward function.
+## The Problem
 
-The environment targets a specific capability gap in agent evaluation: most benchmarks test whether an agent can solve a task after seeing the whole state. Real incidents are different. Each specialist sees only part of the failure, the root cause may be upstream of the visible symptom, and premature actions can make the system worse.
+Large language models are good at answering questions when they can see all the information. Real operational incidents are nothing like that.
 
-OpsSim-AI makes those pressures explicit:
+In a production outage:
 
-- **Partial observability:** each execution agent sees only its domain-specific state.
-- **Coordination pressure:** the Incident Commander must synthesize reports and delegate.
-- **Responsibility boundaries:** agents are penalized for acting outside their domain.
-- **Long-horizon recovery:** many scenarios require investigation, preconditions, and ordered remediation.
-- **Safety oversight:** the Supervisor can veto harmful directives before execution.
+- **No one sees the full picture.** The database team sees lock contention. The infra team sees pod restarts. The app team sees checkout errors. The actual root cause could be upstream of all of them.
+- **Order matters.** Restarting a service before fixing the underlying cause just restarts the failure loop.
+- **Wrong actions make things worse.** Flushing DNS when the problem is a database deadlock wastes time and can introduce new issues.
+- **Someone has to coordinate.** Individual specialists need a commander who synthesizes partial reports and decides what happens next.
 
-## Architecture: 9 Agents
+Most LLM benchmarks test none of this. They give the agent full state, a single decision, and immediate feedback. OpsSim-AI creates the kind of pressure that real incidents create: partial information, delayed payoff, dangerous temptations, and the need to work as a team.
 
-### Execution Layer (7 agents)
+---
 
-| Agent | Domain | Responsibility |
-|-------|--------|---------------|
-| **AppOps** | app | Application metrics, checkout, payment, latency |
-| **InfraOps** | infra | Infrastructure, caching, pod health, compute |
-| **DatabaseOps** | database | DB pools, replication, queries, locks |
-| **NetworkOps** | network | Connectivity, load balancers, DNS, BGP routes |
-| **SecOps** | security | Auth, certificates, firewall, access controls |
-| **MiddlewareOps** | middleware | API gateway, message queues, service mesh, circuit breakers |
-| **ObservabilityOps** | observability | Monitoring, alerts, log pipelines, metrics collection |
+## What This Environment Does
 
-### Coordination Layer
+OpsSim-AI simulates a **distributed war room** with 9 agents responding to cascading production failures across 10 realistic scenarios.
 
-| Agent | Role |
-|-------|------|
-| **Incident Commander (IC)** | Reads all reports, issues directives, plans multi-step resolution |
+### The Agents
 
-### Oversight Layer
+| Layer | Agent | Role |
+|-------|-------|------|
+| Execution | **AppOps**, **InfraOps**, **DatabaseOps**, **NetworkOps**, **SecOps**, **MiddlewareOps**, **ObservabilityOps** | Domain specialists — each sees only their slice of the system |
+| Coordination | **Incident Commander (IC)** | Reads all reports, plans recovery, delegates actions |
+| Oversight | **Supervisor** | Reviews directives, vetoes dangerous actions |
 
-| Agent | Role |
-|-------|------|
-| **Supervisor (Fleet AI)** | Evaluates IC directives, vetoes catastrophic actions |
+### What makes it challenging
 
-## Environment Mental Model
+- **Partial observability.** AppOps can see checkout health but not database lock state. InfraOps can see pod status but not payment logs. The IC must piece together the full picture from narrow domain reports.
+- **Cascading failures.** A single root cause (e.g., a bad canary deploy) spreads across multiple domains. The system keeps degrading while agents deliberate — every step costs time.
+- **Strict responsibility boundaries.** If the IC tells AppOps to fix a database issue, the environment applies a severe penalty. Agents must delegate to the correct domain owner.
+- **Unsafe temptations.** Each scenario includes plausible-sounding but harmful actions (force-restart, flush DNS, kill transactions). Choosing them carries penalties.
+- **Long recovery sequences.** Many scenarios require 5-8 ordered steps: investigate → diagnose root cause → satisfy preconditions → remediate → verify. Skipping steps or acting out of order reduces the reward.
 
-Think of OpsSim-AI as a simulated production war room.
+### The 10 Scenarios
 
-At the start of each episode, the system is already degraded. The failure may appear in one place, but the cause can live somewhere else: a cache outage causing payment failures, a bad canary deployment creating latency spikes, a database deadlock collapsing checkout, or a regional failover problem creating downstream symptoms.
+The environment ships with 10 hand-crafted cascading failure scenarios spanning all 7 operational domains:
 
-The agent team must recover the system by repeatedly answering three questions:
+| Scenario | What Happens |
+|----------|-------------|
+| Checkout Meltdown | 500 errors cascade from payment to checkout to infrastructure |
+| Deploy Gone Wrong | Canary deployment triggers cross-service latency spikes |
+| Network Partition | Cluster split causes replication lag and leader election chaos |
+| Security Breach | Compromised credentials lead to data exfiltration and service lockdown |
+| Cache Avalanche | Redis failure causes thundering herd on the database |
+| Middleware Storm | API gateway overload triggers circuit breaker cascades |
+| Observability Blackout | Monitoring pipeline failure blinds the team during an active incident |
+| DNS Catastrophe | DNS misconfiguration breaks service discovery across regions |
+| Multi-Region Failover | Primary region database failure with broken replication |
+| DB Lock Revenue Cascade | Deadlock chain collapses payment processing |
 
-1. **What do we know?**
-   Each execution agent receives a filtered observation. AppOps may see checkout and payment state; DatabaseOps may see pool or lock state; NetworkOps may see DNS and routing state. No single execution agent starts with the full picture.
+---
 
-2. **What should happen next?**
-   Agents communicate observations into the incident channel. The Incident Commander reads the shared channel, tracks progress toward SLA goals, and chooses a target agent plus action.
+## How It Works
 
-3. **Is the action safe and correctly owned?**
-   The Supervisor evaluates the directive. The environment then checks whether the target agent is responsible for that action, whether prerequisites are met, and whether the action improves or damages the system.
-
-### What the Agent Sees
-
-The observation includes:
-
-- available actions
-- current visible system state
-- playbook text
-- logs / incident description
-- incident-channel messages
-- SLA goal state
-- progress toward recovery
-- domain-filtered views for specialist agents
-
-This creates a useful tension: the IC needs a global plan, but the evidence arrives through narrow domain windows.
-
-### What the Agent Can Do
-
-Agents can:
-
-- investigate symptoms and dependencies
-- report findings through the incident channel
-- execute domain-specific remediation actions
-- follow playbook guidance
-- recover state through transition rules
-- make mistakes such as acting too early, repeating actions, choosing unsafe actions, or assigning work to the wrong domain
-
-Many scenarios include tempting but harmful shortcuts. For example, blindly restarting a service may carry a penalty if the actual root cause has not been fixed.
-
-## Execution Flow (Strict 8-Phase)
+Each episode follows an **8-phase execution loop**:
 
 ```
-1. ObservabilityOps analyzes metrics and surfaces root cause
-2. Execution agents observe their domain and report to incident channel
-3. IC reads all reports from incident channel
-4. IC issues directive (target_agent + action)
-5. Supervisor evaluates directive — approves or vetoes
-6. Target agent executes action
-7. Environment updates state
-8. Reward is computed (13 components)
+┌──────────────────────────────────────────────────────────┐
+│  1. ObservabilityOps analyzes metrics, surfaces clues    │
+│  2. Domain agents observe their slice, report findings   │
+│  3. IC reads all reports from the shared incident channel│
+│  4. IC issues a directive: target_agent + action         │
+│  5. Supervisor evaluates — approve or veto               │
+│  6. Target agent executes the action                     │
+│  7. Environment updates system state                     │
+│  8. Reward is computed (13 components)                   │
+└──────────────────────────────────────────────────────────┘
+         ↓ repeat until SLA restored or max steps reached
 ```
 
-## Reward Function (13 Components)
+The IC is the decision-maker. At each step, it sees the incident description, the shared channel messages, available actions, SLA progress, and the full action history. It must choose **which agent** should act and **what action** they should take.
 
-The total reward at step t follows the formal equation:
+If the action is correct, the system state improves. If not, the cascade gets worse.
+
+---
+
+## The Reward Function
+
+The reward at each step is computed from **13 interpretable components** organized into four pillars:
 
 $$R_t = \Delta H(s_t, s_{t-1}) - \left(B_{sys}(s_t) + \sum_{d \in D} B_{loc}(s_t, d)\right) - \lambda \cdot t$$
 $$+ Q_{act}(a_t) + R_{seq}(a_t, h_t) - P_{resp}(a_t, e) - P_{conf}(a_t, a_{t-1})$$
 $$+ R_{coord}(IC_t, a_t) + R_{obs}(m_{obs}, s_t) + R_{sup}(IC_t) - \gamma \cdot \Sigma(m_t)$$
 $$+ \mathbb{1}_{SLA\_Met} \cdot R_{succ}$$
 
-The reward is designed to score incident behavior, not just endpoint success. It rewards health improvements, valid actions, correct sequencing, good delegation, useful observability, and supervisor judgment. It penalizes ongoing degradation, wasted time, wrong-domain actions, conflicts, repeated or idle behavior, and excessive communication.
+### Pillar I — System Health & Degradation
 
-### Pillar I: System Health & Degradation
+| Component | Symbol | What it measures |
+|-----------|--------|-----------------|
+| Health Delta | ΔH | Did the system get healthier? |
+| Global Bleed | B_sys | Ongoing damage from unresolved incidents |
+| Local Bleed | B_loc | Per-domain degradation penalties |
+| Urgency | λ·t | Time pressure — every step costs more |
 
-| Component | Symbol | Description |
-|-----------|--------|-------------|
-| Global System Health | ΔH | Positive delta when SLA metrics improve |
-| Dynamic Global Bleed | B_sys | Sum of active incident severity weights (not hardcoded) |
-| Local Domain Bleed | B_loc | Per-domain degradation penalties |
-| Urgency Penalty | P_urg | Linear time-decay: λ·t where λ = 1/max_steps |
+### Pillar II — Action & Sequencing
 
-### Pillar II: Action & Sequencing Execution
+| Component | Symbol | What it measures |
+|-----------|--------|-----------------|
+| Action Quality | Q_act | Was this a valid, useful action? |
+| Sequencing | R_seq | Was it done in the right order? |
+| Responsibility | P_resp | Did the right domain agent execute it? (-5.0 if wrong) |
+| Conflict | P_conf | Was it contradictory to the previous action? |
 
-| Component | Symbol | Description |
-|-----------|--------|-------------|
-| Action Quality | Q_act | Rewards valid actions, penalizes invalid/redundant/do_nothing |
-| Sequencing Reward | R_seq | Rewards topologically correct execution order |
-| Responsibility Penalty | P_resp | Massive penalty (-5.0) if agent acts outside its domain |
-| Conflict Penalty | P_conf | Penalizes mutually exclusive or repeated consecutive actions |
+### Pillar III — Coordination & Communication
 
-### Pillar III: Coordination & Communication
+| Component | Symbol | What it measures |
+|-----------|--------|-----------------|
+| Coordination | R_coord | Did the IC delegate to the correct agent? |
+| Observability | R_obs | Did ObservabilityOps surface the root cause? |
+| Supervisor | R_sup | Did the Supervisor correctly approve/veto? |
+| Communication Cost | γ·Σ(m) | Penalty for excessive chatter |
 
-| Component | Symbol | Description |
-|-----------|--------|-------------|
-| Coordination Reward | R_coord | IC correctly delegates to right domain agent |
-| Observability Contribution | R_obs | ObservabilityOps surfaces correct root cause keywords |
-| Supervisor Effect | R_sup | Correct veto of harmful actions / penalty for rubber-stamping |
-| Communication Cost | P_comm | γ·Σ(messages) prevents LLM chatter loops |
+### Pillar IV — Terminal
 
-### Pillar IV: Terminal
+| Component | Symbol | What it measures |
+|-----------|--------|-----------------|
+| Success | R_succ | +2.0 bonus when all SLA conditions are met |
 
-| Component | Symbol | Description |
-|-----------|--------|-------------|
-| Success Reward | R_succ | +2.0 when all SLA conditions met |
+This reward structure means agents get feedback on **how** they solve the incident, not just **whether** they solve it. Good investigation, correct delegation, safe sequencing, and efficient communication are all rewarded independently.
 
-## do_nothing Prevention
+### Reward Examples: What Gets Rewarded vs Penalized
 
-1. **Action Filtering**: do_nothing removed from available actions when valid actions exist
-2. **Escalating Penalty**: -0.3 × (consecutive_count)^1.5
-3. **Stagnation Detection**: Extra penalty when no health improvement for 3+ steps
+To make the reward concrete, here are exact values from the environment:
 
-## Long-Horizon Planning
+**Positive reward scenarios (good behavior):**
 
-- **Goal Decomposition**: IC receives unmet SLA goals and must plan multi-step resolution
-- **Progress Tracking**: Real-time % of SLA conditions met, injected into all prompts
-- **Dependency Awareness**: Action domains + sequencing reward enforce causal ordering
-- **Persistent Memory**: Full action history with outcomes tracked across episode
-- **Recovery**: Supervisor can veto and suggest alternatives when stuck
+| Situation | Component | Reward |
+|-----------|-----------|--------|
+| Gold action with preconditions met | Action Quality (Q_act) | +0.15 to +0.30 (from transition rules) |
+| Action follows correct causal order | Sequencing (R_seq) | +0.15 |
+| IC delegates to the correct domain agent | Coordination (R_coord) | +0.15 |
+| ObservabilityOps surfaces ≥3 root cause keywords | Observability (R_obs) | +0.30 |
+| Supervisor correctly vetoes a harmful action | Supervisor (R_sup) | +0.20 |
+| System health improves after the action | Health Delta (ΔH) | +0.10 per improved state variable |
+| All SLA conditions met (episode success) | Success (R_succ) | **+2.00** |
 
-## Why It Matters
+**Negative reward scenarios (bad behavior):**
 
-OpsSim-AI is useful for researchers and builders who care about agent reliability in operational settings.
+| Situation | Component | Penalty |
+|-----------|-----------|---------|
+| Wrong domain agent executes the action | Responsibility (P_resp) | **-5.00** (episode terminates) |
+| SLA violated (unrecoverable failure) | Success (R_succ) | -2.00 (episode terminates) |
+| Picking a penalized/unsafe action | Action Quality (Q_act) | -0.50 to -1.00 |
+| Invalid action (not in available list) | Action Quality (Q_act) | -0.50 |
+| Doing nothing when valid actions exist | Action Quality (Q_act) | -0.30 × (consecutive_count)^1.5 |
+| Acting out of order (skipping prerequisites) | Sequencing (R_seq) | -0.15 |
+| Contradictory action (conflicts with previous) | Conflict (P_conf) | -0.30 |
+| Repeating the same action consecutively | Conflict (P_conf) | -0.10 |
+| IC delegates to wrong domain agent | Coordination (R_coord) | -0.10 |
+| Supervisor rubber-stamps a harmful action | Supervisor (R_sup) | -0.20 |
+| Excessive communication (chatter) | Communication (γ·Σ) | -0.02 per message |
+| No health improvement for 3+ steps | Stagnation | additional penalty |
 
-Real-world incident response is not a single-tool benchmark. It requires diagnosis under partial information, coordination between specialists, safe sequencing, and discipline around ownership. A strong model should know when to investigate, when to act, when to escalate, and when not to touch something.
+**During GRPO training**, the environment reward is combined with three additional shaping functions:
 
-This environment is interesting because it combines:
+| Function | When it applies | Value |
+|----------|----------------|-------|
+| `parse_penalty` | Model output is not valid JSON | -0.50 |
+| `format_penalty` | JSON is missing required keys (`analysis`, `plan`, `next_action`, `target_agent`, `reasoning`, `confidence`) | -0.25 |
+| `unsafe_penalty` | Predicted action is in the scenario's unsafe action list | -0.30 |
 
-- **multi-agent coordination** with explicit roles
-- **partial observability** across operational domains
-- **stateful cascading failures** with transition rules
-- **reward shaping** for investigation, delegation, sequencing, and safety
-- **OpenEnv compatibility** for evaluation and training loops
+This creates a total training reward range of approximately **[-2.05, +1.50]**, where decision quality (the env signal) dominates the upside and format/safety guards prevent degenerate outputs.
 
-That makes it a compact testbed for studying whether LLM agents can move from "answering correctly" toward operating responsibly in a simulated production system.
+---
 
-## Why This Project Fits the Hackathon Themes
+## Why This Is Interesting
 
-### Theme #1 – Multi-Agent Interactions
+Most agent benchmarks test a single capability: tool use, code generation, or question answering. OpsSim-AI tests several capabilities simultaneously, in a setting where they interact:
 
-- Seven specialist agents observe different parts of the system, so no single agent has the full answer.
-- The Incident Commander coordinates through a shared war-room channel, then delegates actions to the right domain owner.
-- The Supervisor adds an oversight layer by checking whether directives are safe before execution.
+- **Diagnosis under partial information** — the agent must reason about what it *cannot* see
+- **Multi-step planning** — early investigation steps only pay off several actions later
+- **Coordination across specialists** — choosing the right expert matters as much as choosing the right action
+- **Safety discipline** — resisting harmful shortcuts that look plausible
+- **Recovery from mistakes** — the Supervisor can veto, and the agent must adapt
 
-### Theme #2 – Long-Horizon Planning
+This makes OpsSim-AI a compact but meaningful testbed for studying whether LLM agents can move from "answering correctly" toward **operating responsibly** in complex systems.
 
-- Incidents require ordered recovery: investigate symptoms, identify root cause, satisfy preconditions, then remediate.
-- Rewards are delayed because early diagnostic steps may only pay off after later fixes restore SLA health.
-- The environment tracks history, progress, failed actions, and stagnation so agents must recover from mistakes.
+---
 
-### Theme #3 – World Modeling (Professional Tasks)
+## Demo
 
-- The environment simulates realistic production systems with application, infrastructure, database, network, security, middleware, and observability state.
-- Agents operate under partial observability, matching how real incident teams only see the signals available to their role.
-- Success depends on causal reasoning: agents must connect upstream failures to downstream symptoms instead of chasing surface alerts.
+🔗 **Hugging Face Space:** [Coming soon — link will be added here]
 
-### Theme #4 – Self-Improvement
+The demo lets you:
 
-- The reward function breaks behavior into interpretable feedback signals such as sequencing, delegation, safety, and communication cost.
-- `generate_sft_dataset.py` and `train.py` support improvement loops by turning scenarios and reward-guided behavior into data for supervised or RL-style training.
-- Evaluation traces can show where an agent stalls, repeats bad actions, or delegates incorrectly, making failures easier to learn from.
+- Select a cascading failure scenario
+- Watch the agent team diagnose and resolve the incident step by step
+- See the 13-component reward breakdown at each step
+- Compare agent decisions against the optimal recovery path
+- View the war room's incident channel and communication flow
+
+---
+
+## Training Pipeline
+
+OpsSim-AI includes a full **SFT → GRPO** training pipeline that takes raw scenario definitions and produces a fine-tuned LLM that makes better incident response decisions.
+
+### End-to-End Flow
+
+```
+┌────────────────────┐
+│  tasks/cascade.json │  10 hand-crafted cascading failure scenarios
+│  (scenario defs)    │  Each has: initial_state, transition_rules,
+│                     │  optimal_solution_path, unsafe actions, SLA rules
+└────────┬───────────┘
+         │
+         ▼
+┌────────────────────────┐
+│  generate_sft_dataset.py│  Walks each scenario's optimal path step by step
+│  (dataset generation)   │  Generates supervised examples + RL prompts
+└────────┬───────────────┘
+         │
+         ├──► sft_train.jsonl     ~120-180 supervised examples (gold + contrast)
+         ├──► sft_val.jsonl       validation split
+         └──► grpo_prompts.jsonl  ~66 RL prompts (one per scenario step)
+         │
+         ▼
+┌────────────────────┐
+│  train_sft.py       │  Supervised fine-tuning with LoRA
+│  (Stage 1: SFT)     │  Teaches: valid JSON output, 6-key schema, basic actions
+└────────┬───────────┘
+         │
+         ▼  SFT adapter (LoRA weights)
+┌────────────────────┐
+│  train_grpo.py      │  Group Relative Policy Optimization
+│  (Stage 2: GRPO)    │  Each prediction is run through DevOpsEnv
+│                     │  Reward = env score + parse + format + unsafe penalties
+│                     │  8 completions per prompt, best-vs-worst drives learning
+└────────┬───────────┘
+         │
+         ▼  GRPO adapter (final LoRA weights) + training plots
+```
+
+### What the Data Looks Like
+
+**Each scenario** in `tasks/cascade.json` defines a complete incident with the following structure:
+
+```
+scenario_id             → unique identifier (e.g. "cascade_001_checkout_meltdown")
+description             → one-line incident summary
+initial_state           → dict of system variables (e.g. checkout: "failing", redis: "offline")
+playbook_text           → investigation/remediation runbook for the IC
+available_actions       → all possible actions the agent can take
+optimal_solution_path   → the correct ordered sequence of 5-8 gold actions
+transition_rules        → for each action: preconditions, state effects, reward/else_reward
+penalties               → map of unsafe actions to their penalty values (-0.5 to -1.0)
+sla_rules               → conditions that must be met for success (e.g. checkout: "operational")
+action_domains          → which actions belong to which domain (for responsibility checking)
+severity_weights        → active incident severity (drives global bleed)
+conflict_pairs          → pairs of mutually exclusive actions
+root_cause_keywords     → terms ObservabilityOps should surface
+```
+
+From these 10 scenarios, the dataset generator creates **~66 gold training prompts** (one per step in each optimal path) and **~120-180 SFT examples** (gold + contrast rejection pairs).
+
+**Each training example** is a prompt-response pair. The prompt gives the model:
+
+- The incident description and current system state
+- A playbook with investigation/remediation guidance
+- Available actions and SLA progress
+- The full action history so far
+
+The model must respond with a JSON object:
+
+```json
+{
+  "analysis": "Payment service is timing out due to database connection pool exhaustion",
+  "plan": "First verify DB pool state, then drain stale connections, then restart checkout",
+  "next_action": "check_connection_pools",
+  "target_agent": "DatabaseOps",
+  "reasoning": "Checkout errors are a symptom; the root cause is upstream in the database layer",
+  "confidence": 0.85
+}
+```
+
+**SFT examples** pair each prompt with the correct gold response. **Contrast examples** include an unsafe candidate action in the prompt and train the model to reject it. **GRPO prompts** contain only the prompt — the model generates its own response, which is then scored by the live environment.
+
+### How GRPO Training Works
+
+During GRPO, the model generates **8 different completions** for each prompt. Each completion is parsed and run through the actual DevOps environment simulator (`env.py`):
+
+1. The environment replays the scenario up to the current step
+2. The model's predicted action is executed in the environment
+3. The environment returns a reward based on action quality, sequencing, coordination, health impact, and safety
+4. Additional penalties are applied for invalid JSON, missing keys, or unsafe actions
+5. GRPO computes group-relative advantages (which of the 8 completions scored best vs worst)
+6. The policy is updated to increase the probability of higher-reward completions
+
+This means the model learns from **direct interaction with the environment**, not just from imitating gold labels.
+
+### Current Training Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Base Model | `Qwen/Qwen2.5-3B-Instruct` |
+| GRPO Steps | 500 |
+| Learning Rate | 2e-5 |
+| KL Beta | 0.005 |
+| Num Generations | 8 |
+| Batch Size | 8 |
+| Temperature | 0.9 |
+| Warmup Ratio | 0.05 |
+| LoRA Rank | 16 |
+| Curriculum | Easy → Medium → All scenarios |
+
+> For detailed training instructions, see [TRAINING_README.md](TRAINING_README.md).
+
+### Training Results
+
+Training results and evaluation plots will be added after the next full training run completes.
+
+---
+
+## Training Plots (Qwen2.5-3B, 300-step GRPO Run)
+
+These plots are from a completed GRPO training run on **Qwen2.5-3B-Instruct** (300 steps, L40S GPU, ~3 hours). All plots are auto-generated and pushed to the HF Hub alongside the model adapter.
+
+### Reward — The Primary Signal
+
+![Reward Smoothed](plots/grpo_reward_smoothed.png)
+
+**The most important plot.** Smoothed reward trends clearly upward from ~0.22 to ~0.40 over 300 steps — the model is learning to take better actions in the environment.
+
+### KL Divergence — Is the Policy Learning?
+
+![KL Divergence](plots/grpo_kl_only.png)
+
+KL between current policy and SFT reference rises steadily from 0 to ~0.005-0.008. This confirms the model is exploring new behavior rather than staying frozen at the SFT baseline.
+
+### Quality Metrics — Accuracy & Safety
+
+![Quality Metrics](plots/grpo_quality_metrics.png)
+
+- **valid_json_rate** (~97%): Model almost always produces well-formed JSON
+- **accuracy** (~55-60%): Correct gold action picked more than half the time
+- **agent_accuracy** (~65%): Correct domain agent routing
+- **unsafe_rate** (~15%): Still too high — fixed by re-adding `unsafe_penalty` for the next run
+
+### Reward Component Breakdown
+
+![Reward Components](plots/grpo_reward_components.png)
+
+The env_reward (main environment signal) dominates the reward. Parse and format penalties are near zero — the model learned valid output formatting from SFT.
+
+### Key Environment Signals
+
+![Action Quality](plots/grpo_component_env_action_quality.png)
+
+Action quality trends upward (0.05 → 0.10) — the model picks increasingly appropriate actions.
+
+![Coordination](plots/grpo_component_env_coordination_reward.png)
+
+Coordination reward stabilized near the ceiling (~0.14 of 0.15 max) early — the model quickly learned which domain agent should handle each action.
+
+![Sequencing](plots/grpo_component_env_sequencing_reward.png)
+
+Sequencing reward trends upward (0.06 → 0.10) — the model is learning to investigate before remediating, following the correct causal order.
+
+---
 
 ## Project Structure
 
 ```
-├── env.py              # DevOpsEnv — 13-component reward, 7 domains, OpenEnv-compatible
-├── models.py           # Pydantic models (Action, Observation, Reward with 13 fields, State)
-├── multi_agent.py      # WarRoom + 9 agents (7 execution + IC + Supervisor)
-├── inference.py        # LLM loop: 8-phase execution with Supervisor veto
-├── train.py            # GRPO training with TRL (tool-calling, LoRA)
-├── generate_sft_dataset.py # SFT dataset generation from cascade scenarios
-├── server/app.py       # FastAPI server for HF Space
-├── tasks/cascade.json  # 10 scenarios × 7 domains
-├── eval_results/       # Evaluation artifacts
-├── openenv.yaml        # OpenEnv manifest
-├── Dockerfile          # Container
-└── requirements.txt    # Dependencies
+├── env.py                    # DevOpsEnv — 13-component reward, 7 domains, OpenEnv-compatible
+├── models.py                 # Pydantic models: Action, Observation, Reward (13 fields), State
+├── multi_agent.py            # WarRoom orchestrator + 9 agents (7 execution + IC + Supervisor)
+├── inference.py              # LLM inference loop: 8-phase execution with Supervisor veto
+├── train_grpo.py             # GRPO training with env-grounded reward + curriculum
+├── train_sft.py              # Supervised fine-tuning with LoRA
+├── generate_sft_dataset.py   # Dataset generation from cascade scenarios
+├── submit_hf_job.py          # One-command cloud training on HF Jobs
+├── run_trained_inference.py   # Test trained models on specific scenarios
+├── server/app.py             # FastAPI server for Hugging Face Space
+├── tasks/cascade.json        # 10 cascading failure scenarios × 7 domains
+├── openenv.yaml              # OpenEnv manifest
+├── TRAINING_README.md        # Detailed training guide with plot interpretation
+├── Dockerfile                # Container for HF Space deployment
+└── requirements.txt          # Dependencies
 ```
 
-## Usage
+---
 
-### Inference
+## Quick Start
+
+### Run inference
 
 ```bash
 export HF_TOKEN=your_token
 python inference.py
 ```
 
-### Training
-
-```bash
-python train.py --model Qwen/Qwen3-0.6B --output_dir ./opssim-grpo-output
-```
-
-### Server
+### Run the API server
 
 ```bash
 python server/app.py
 ```
 
+### Train on Hugging Face Jobs
+
+```bash
+python submit_hf_job.py all --flavor l40sx1
+```
+
+---
+
+## Additional Resources
+
+- 📹 **Demo Video:** [Coming soon]
+- 📝 **Blog Post:** [Coming soon]
+- 📊 **Slides:** [Coming soon]
+
+---
+
+## Conclusion
+
+OpsSim-AI creates a training ground where LLM agents face the same pressures as real incident response teams: partial information, time pressure, dangerous shortcuts, and the need to coordinate across specialists.
+
+The environment rewards agents not just for solving the incident, but for *how* they solve it — investigating before acting, delegating to the right expert, following safe sequences, and communicating efficiently.
+
+We believe this kind of structured, multi-agent, stateful environment is essential for moving LLM agents from answering questions to operating real systems reliably.
+
+---
+
 ## Authors
 
+- Nithish
 - Sandeep
 - Venkatesh
-- Nithish
 
 
