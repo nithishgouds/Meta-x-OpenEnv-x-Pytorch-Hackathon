@@ -485,9 +485,12 @@ class EnvScorer:
 #                         receive -0.3 (not 0) to penalise bad JSON.
 #   parse_penalty       : -0.5 if completion is not valid JSON, else 0.0.
 #   format_penalty      : -0.25 if required keys are missing, else 0.0.
-# Total reward range ~ [-1.75, +1.5]. Decision quality (env signal) dominates
-# the upside; parse/format guard the downside. No external unsafe_penalty —
-# the env already penalises bad actions via action_quality.
+#   unsafe_penalty      : -0.3 if predicted action is in the unsafe list.
+#                         The env's action_quality does NOT specifically
+#                         penalise unsafe actions, so this provides the only
+#                         direct gradient signal to avoid them.
+# Total reward range ~ [-2.05, +1.5]. Decision quality (env signal) dominates
+# the upside; parse/format/unsafe guard the downside.
 
 REQUIRED_KEYS = {"analysis", "plan", "next_action", "target_agent", "reasoning", "confidence"}
 
@@ -604,10 +607,12 @@ def unsafe_penalty(completions, unsafe_actions, **_kwargs):
             rewards.append(0.0)
             continue
         pred = str(payload.get("next_action", ""))
-        # Reduced from -1.0 to -0.5: the env already penalises bad actions
-        # via action_quality, so -1.0 double-counted and was too punitive
-        # relative to the positive side of the reward range (~+0.6).
-        rewards.append(-0.5 if pred in set(unsafe or []) else 0.0)
+        # -0.3: lighter than the old -1.0 (which dominated the reward range)
+        # but still provides a direct signal to avoid unsafe actions.
+        # The env's action_quality does NOT specifically penalise unsafe
+        # actions — it only rewards matching transition rules — so without
+        # this function the model has zero gradient signal to avoid them.
+        rewards.append(-0.3 if pred in set(unsafe or []) else 0.0)
     update_reward_snapshot("unsafe_penalty", rewards)
     return rewards
 
@@ -698,8 +703,8 @@ def main() -> None:
     parser.add_argument("--num-generations", type=int, default=8)
     parser.add_argument("--max-completion-length", type=int, default=384)
     parser.add_argument("--max-prompt-length", type=int, default=1536)
-    parser.add_argument("--learning-rate", type=float, default=1e-5)
-    parser.add_argument("--beta", type=float, default=0.01,
+    parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument("--beta", type=float, default=0.005,
                         help="KL coefficient anchoring the policy to the SFT reference.")
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=100)
@@ -714,6 +719,8 @@ def main() -> None:
     parser.add_argument("--no-curriculum", dest="curriculum", action="store_false")
     parser.add_argument("--temperature", type=float, default=0.9,
                         help="Sampling temperature for GRPO generation (higher = more exploration).")
+    parser.add_argument("--warmup-ratio", type=float, default=0.05,
+                        help="Fraction of total steps for learning rate warmup.")
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -768,6 +775,7 @@ def main() -> None:
         max_completion_length=args.max_completion_length,
         max_prompt_length=args.max_prompt_length,
         learning_rate=args.learning_rate,
+        warmup_ratio=args.warmup_ratio,
         beta=args.beta,
         temperature=args.temperature,
         logging_steps=args.logging_steps,
@@ -792,6 +800,7 @@ def main() -> None:
             env_reward,
             parse_penalty,
             format_penalty,
+            unsafe_penalty,
         ],
         peft_config=peft_config,
         callbacks=[GRPOPlotMetricsCallback(plot_paths)],
@@ -827,7 +836,25 @@ def main() -> None:
         )
 
     # Headline numbers for quick post-run inspection (and dashboards).
+    # Compute cumulative averages across ALL batches (not just the last one)
+    # so that metrics like env_success_rate reflect the full training run.
+    cumulative_metrics = {}
+    if metrics_log:
+        metric_keys = ["valid_json_rate", "accuracy", "agent_accuracy", "unsafe_rate",
+                       "env_success_rate", "env_sla_fail_rate", "env_stepped_rate", "raw_reward_mean"]
+        for key in metric_keys:
+            vals = [m[key] for m in metrics_log if key in m]
+            cumulative_metrics[key] = round(sum(vals) / len(vals), 6) if vals else 0.0
+        # Also compute metrics from the last 10% of training (late-stage performance)
+        late_start = max(0, len(metrics_log) - len(metrics_log) // 10)
+        late_metrics = {}
+        for key in metric_keys:
+            vals = [m[key] for m in metrics_log[late_start:] if key in m]
+            late_metrics[key] = round(sum(vals) / len(vals), 6) if vals else 0.0
+        cumulative_metrics["late_stage"] = late_metrics
+
     final = {
+        "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "stage": "grpo",
         "model": args.model,
         "sft_adapter": args.sft_adapter,
@@ -837,6 +864,7 @@ def main() -> None:
         "kl_beta": args.beta,
         "curriculum_used": bool(args.curriculum),
         "last_quality_metrics": metrics_log[-1] if metrics_log else {},
+        "cumulative_quality_metrics": cumulative_metrics,
     }
     write_final_metrics(args.output_dir, final)
 

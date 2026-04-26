@@ -14,7 +14,8 @@ This document walks you through running the full **SFT → GRPO** training pipel
 6. [Output Artifacts](#6-output-artifacts)
 7. [How to Read the Training Plots](#7-how-to-read-the-training-plots)
 8. [Inference with Trained Model](#8-inference-with-trained-model)
-9. [Troubleshooting](#9-troubleshooting)
+9. [Training Run Analysis (Qwen2.5-3B, 300 steps)](#9-training-run-analysis-qwen25-3b-300-steps)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -88,7 +89,7 @@ This creates `data/generated/sft_train.jsonl`, `sft_val.jsonl`, and `grpo_prompt
 
 ```bash
 python train_sft.py 
-  --model Qwen/Qwen2.5-1.5B-Instruct 
+  --model Qwen/Qwen2.5-3B-Instruct 
   --train-file data/generated/sft_train.jsonl 
   --val-file data/generated/sft_val.jsonl 
   --output-dir outputs/smoke-sft 
@@ -109,7 +110,7 @@ python train_sft.py
 
 ```bash
 python train_grpo.py \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --model Qwen/Qwen2.5-3B-Instruct \
   --sft-adapter outputs/smoke-sft \
   --input tasks/cascade.json \
   --prompt-file data/generated/grpo_prompts.jsonl \
@@ -176,11 +177,11 @@ python generate_sft_dataset.py \
 
 ```bash
 python train_sft.py \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --model Qwen/Qwen2.5-3B-Instruct \
   --train-file data/generated/sft_train.jsonl \
   --val-file data/generated/sft_val.jsonl \
-  --output-dir outputs/sft-qwen25-1p5b \
-  --hub-model-id <your-hf-user>/opssim-qwen25-1p5b-sft-lora \
+  --output-dir outputs/sft-qwen25-3b \
+  --hub-model-id <your-hf-user>/opssim-qwen25-3b-sft-lora \
   --epochs 1 \
   --batch-size 1 \
   --grad-accum 8 \
@@ -202,37 +203,39 @@ python train_sft.py \
 
 ```bash
 python train_grpo.py \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --sft-adapter <your-hf-user>/opssim-qwen25-1p5b-sft-lora \
+  --model Qwen/Qwen2.5-3B-Instruct \
+  --sft-adapter <your-hf-user>/opssim-qwen25-3b-sft-lora \
   --input tasks/cascade.json \
   --prompt-file data/generated/grpo_prompts.jsonl \
-  --output-dir outputs/grpo-qwen25-1p5b \
-  --hub-model-id <your-hf-user>/opssim-qwen25-1p5b-grpo-lora \
-  --max-steps 250 \
+  --output-dir outputs/grpo-qwen25-3b \
+  --hub-model-id <your-hf-user>/opssim-qwen25-3b-grpo-lora \
+  --max-steps 500 \
   --batch-size 8 \
   --grad-accum 2 \
   --num-generations 8 \
   --max-completion-length 384 \
   --max-prompt-length 1536 \
-  --learning-rate 1e-5 \
-  --beta 0.01 \
+  --learning-rate 2e-5 \
+  --beta 0.005 \
   --temperature 0.9 \
+  --warmup-ratio 0.05 \
   --save-steps 100
 ```
 
 | Parameter | Value | Reasoning |
 |-----------|-------|-----------|
-| `max-steps` | 250 | 250 × 8 completions = 2000 graded completions |
+| `max-steps` | 500 | 500 × 8 completions = 4000 graded completions; reward still climbing at 300 in prior runs |
 | `batch-size` | 8 | Must equal `num-generations` (all 8 completions for 1 prompt per micro-batch) |
 | `num-generations` | 8 | 8 completions per prompt for rich GRPO advantages |
 | `grad-accum` | 2 | Each optimizer step sees 2 prompts × 8 completions = 16 graded samples |
-| `learning-rate` | 1e-5 | Higher than typical GRPO to break through frozen-KL (prior runs had KL≈0.0008) |
-| `beta` | 0.01 | Low KL penalty to allow exploration away from SFT policy |
+| `learning-rate` | 2e-5 | Higher than typical GRPO — prior run showed KL≈0.005 with lr=1e-5 (too conservative) |
+| `beta` | 0.005 | Reduced from 0.01 to allow more policy divergence from SFT |
 | `temperature` | 0.9 | Encourages diverse completions (diverse actions = meaningful GRPO advantages) |
+| `warmup-ratio` | 0.05 | Smooths noisy early gradients for first 5% of training |
 
-**Duration:** ~2-3 hours on A100, ~3-4 hours on L40S.
+**Duration:** ~3-5 hours on L40S, ~2-3 hours on A100.
 
-> **Note:** If using a **3B model** (`Qwen/Qwen2.5-3B-Instruct`), you need an 80 GB GPU. Replace `1.5B` with `3B` in all commands and repo names.
+> **Note:** All commands above use the 3B model. For a lighter run on smaller GPUs, replace `3B` with `1.5B` in model names and repo slugs.
 
 ---
 
@@ -250,12 +253,20 @@ python submit_hf_job.py smoke --flavor l40sx1       # submit
 ### Full pipeline (SFT + GRPO combined)
 
 ```bash
-python submit_hf_job.py all \
-  --flavor l40sx1 \
-  --hf-user <your-username> \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --branch main
+python submit_hf_job.py all --flavor l40sx1
 ```
+
+This runs SFT + GRPO end-to-end with the updated params (`lr=2e-5`, `beta=0.005`, 500 steps, `warmup=0.05`, `unsafe_penalty` re-added). Timeout is 8h, estimated cost **~$10-14** on L40S.
+
+### GRPO only (skip SFT)
+
+If you already have a working SFT adapter from a prior run (e.g. `meancodi/opssim-qwen25-3b-sft-lora`):
+
+```bash
+python submit_hf_job.py grpo --flavor l40sx1
+```
+
+This runs only GRPO, reusing the existing SFT adapter. Timeout 6h, estimated cost **~$7-9** on L40S.
 
 ### Individual stages
 
@@ -268,12 +279,23 @@ Available stages: `smoke`, `sft`, `grpo`, `all` (combined SFT + GRPO).
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--flavor` | `l40sx1` | GPU type. Use `a100-large` for 3B models |
-| `--model` | `Qwen/Qwen2.5-1.5B-Instruct` | Base model |
+| `--flavor` | `l40sx1` | GPU type (L40S 48GB — sufficient for 3B) |
+| `--model` | `Qwen/Qwen2.5-3B-Instruct` | Base model |
 | `--hf-user` | `meancodi` | Your HF username (repos are created as `<user>/opssim-...`) |
 | `--branch` | `sandeep` | Git branch to clone |
-| `--timeout` | auto (20m/2h/4h/6h) | Max runtime |
+| `--timeout` | auto (20m/2h/6h/8h) | Max runtime |
 | `--dry-run` | off | Print command without submitting |
+
+### Cost estimates
+
+| Stage | GPU | Time | Cost |
+|-------|-----|------|------|
+| Smoke | L40S | ~10 min | ~$0.30 |
+| SFT only | L40S | ~1-1.5h | ~$2-3 |
+| GRPO only (500 steps) | L40S | ~4-5h | ~$7-9 |
+| All (SFT + GRPO) | L40S | ~5-6.5h | ~$10-14 |
+
+> L40S is $1.80/h on HF Jobs.
 
 The job automatically:
 1. Clones the repo & installs dependencies
@@ -288,7 +310,7 @@ The job automatically:
 After training completes, the output directory contains:
 
 ```
-outputs/grpo-qwen25-1p5b/
+outputs/grpo-qwen25-3b/
 ├── adapter_model.safetensors    # LoRA weights (the trained model)
 ├── adapter_config.json          # LoRA config
 ├── tokenizer.json               # Tokenizer
@@ -353,7 +375,13 @@ After training, the `plots/` directory contains ~15-20 PNG files. Here's what ea
 
 **What it shows:** GRPO policy loss per step.
 
-**Healthy:** Decreasing trend. In GRPO, loss = negative expected advantage × log probability, so lower loss means the policy is putting more probability on high-reward actions.
+**Important:** GRPO loss behaves **differently from supervised loss**. In GRPO, loss = $-\mathbb{E}[\text{advantage} \times \log\pi_\theta(a|s)]$. Advantages are computed GROUP-relative (zero-mean within each group of `num_generations` completions). This means:
+- Loss oscillates around 0 and does **NOT monotonically decrease** — this is expected!
+- As the policy improves, all completions become similar → advantages shrink → loss stays near 0
+- When curriculum shifts to harder scenarios, loss temporarily spikes
+- The sign alternates: negative loss = increasing probability of good actions, positive = decreasing probability of bad actions
+
+**The correct metric to judge GRPO training is the REWARD curve, not the loss curve.** If reward trends upward, training is working — regardless of what loss does.
 
 #### `grpo_kl_only.png`
 
@@ -419,13 +447,14 @@ After training finishes, check these plots in order:
 
 | # | Plot | What to verify |
 |---|------|---------------|
-| 1 | `grpo_reward_smoothed.png` | **Reward trends upward** |
+| 1 | `grpo_reward_smoothed.png` | **Reward trends upward** (most important signal) |
 | 2 | `grpo_kl_only.png` | **KL rises to 0.01-0.10** (not stuck at 0) |
-| 3 | `grpo_loss_only.png` | **Loss trends downward** |
+| 3 | `grpo_loss_only.png` | **Loss oscillates near 0** (GRPO loss does NOT need to decline — see §7.1) |
 | 4 | `grpo_component_env_action_quality.png` | Action quality improving |
-| 5 | `grpo_quality_metrics.png` | Accuracy increasing, parse errors decreasing |
+| 5 | `grpo_quality_metrics.png` | Accuracy increasing, unsafe_rate decreasing |
+| 6 | `grpo_unsafe_rate.png` | Unsafe action rate declining over training |
 
-If plots 1-3 all look healthy, training worked correctly.
+If plots 1-2 look healthy, training is working correctly.
 
 ---
 
@@ -435,8 +464,8 @@ After training, test the model on a scenario:
 
 ```bash
 python run_trained_inference.py \
-  --base-model Qwen/Qwen2.5-1.5B-Instruct \
-  --adapter <your-hf-user>/opssim-qwen25-1p5b-grpo-lora \
+  --base-model Qwen/Qwen2.5-3B-Instruct \
+  --adapter <your-hf-user>/opssim-qwen25-3b-grpo-lora \
   --scenario cascade_001_checkout_meltdown \
   --step-idx 1
 ```
@@ -445,8 +474,8 @@ Or with a local adapter:
 
 ```bash
 python run_trained_inference.py \
-  --base-model Qwen/Qwen2.5-1.5B-Instruct \
-  --adapter outputs/grpo-qwen25-1p5b \
+  --base-model Qwen/Qwen2.5-3B-Instruct \
+  --adapter outputs/grpo-qwen25-3b \
   --scenario cascade_001_checkout_meltdown \
   --step-idx 1
 ```
@@ -455,7 +484,51 @@ Expected output: a JSON object with `next_action`, `target_agent`, `analysis`, `
 
 ---
 
-## 9. Troubleshooting
+## 9. Training Run Analysis (Qwen2.5-3B, 300 steps)
+
+This section documents findings from the first full 3B GRPO run and the fixes applied.
+
+### 9.1 What went well
+
+| Metric | Observation |
+|--------|-------------|
+| **Reward (smoothed)** | Clear upward trend: 0.22 → 0.40 over 300 steps |
+| **KL divergence** | Steadily rising: 0 → 0.005-0.008 (policy is learning) |
+| **valid_json_rate** | ~97% throughout (model produces well-formed JSON) |
+| **format_penalty** | Near-zero after step 200 (learned output schema) |
+| **parse_penalty** | Rare spikes only (model consistently parses) |
+| **env_action_quality** | Upward trend: 0.05 → 0.10 |
+| **env_delta_health** | Upward trend: 0.03 → 0.07 |
+| **env_coordination_reward** | Stabilized near ceiling (~0.14 of 0.15 max) |
+
+### 9.2 Issues diagnosed
+
+| Issue | Root Cause | Fix Applied |
+|-------|-----------|-------------|
+| **Loss not declining** | GRPO loss oscillates near 0 by design (group-relative advantages are zero-mean). This is NOT a bug. | Updated docs (§7) to explain this is expected. Reward is the correct metric. |
+| **env_success_rate = 0.0** | `final_metrics.json` reports only the LAST batch's metrics. The `success_reward` plot shows periodic non-zero values, proving SLA passes DO happen. | Added cumulative quality metrics to `final_metrics.json` so the aggregate picture is visible. |
+| **unsafe_rate ~15% (flat)** | `unsafe_penalty` was removed from `reward_funcs` in a prior fix to prevent double-counting. But the env's `action_quality` does NOT specifically penalize unsafe actions — it only rewards matching transition rules. The model had **zero direct gradient signal** to avoid unsafe actions. | Re-added `unsafe_penalty` at -0.3 (lighter than old -0.5). |
+| **KL too low (~0.005)** | `lr=1e-5` and `beta=0.01` were too conservative — the KL penalty dominated small gradient updates. | Increased LR to `2e-5`, reduced beta to `0.005`, added `warmup_ratio=0.05`. |
+| **accuracy plateaued ~55-60%** | 300 steps may not be enough; reward was still climbing. | Increased default to 500 steps. |
+
+### 9.3 Reward function composition (current)
+
+```
+Total Reward = env_reward + parse_penalty + format_penalty + unsafe_penalty
+
+env_reward:      [-1.0, +1.5]  ← controllable env components only
+parse_penalty:   -0.5 or 0.0   ← invalid JSON
+format_penalty:  -0.25 or 0.0  ← missing required keys
+unsafe_penalty:  -0.3 or 0.0   ← predicted action in unsafe list
+
+Total range:     [-2.05, +1.5]
+```
+
+The `env_reward` uses only controllable components: `action_quality + sequencing_reward + coordination_reward + success_reward + delta_health + conflict_penalty`. Uncontrollable penalties (urgency, bleed, stagnation) are stripped. Responsibility violations get a fixed -0.5 instead of the env's catastrophic -5.0.
+
+---
+
+## 10. Troubleshooting
 
 ### Training crashes / OOM
 
@@ -494,7 +567,7 @@ This is a known issue with `transformers` on Python 3.13 + Windows. The training
 | `--model` | `Qwen/Qwen2.5-3B-Instruct` | Base model |
 | `--train-file` | `data/generated/sft_train.jsonl` | Training data |
 | `--val-file` | `data/generated/sft_val.jsonl` | Validation data |
-| `--output-dir` | `outputs/sft-qwen2.5-1.5b` | Output directory |
+| `--output-dir` | `outputs/sft-qwen2.5-3b` | Output directory |
 | `--hub-model-id` | `""` | HF Hub repo (empty = don't push) |
 | `--max-seq-length` | `1536` | Max sequence length |
 | `--epochs` | `1.0` | Training epochs |
@@ -522,9 +595,10 @@ This is a known issue with `transformers` on Python 3.13 + Windows. The training
 | `--num-generations` | `8` | Completions per prompt for GRPO |
 | `--max-completion-length` | `384` | Max tokens per completion |
 | `--max-prompt-length` | `1536` | Max prompt tokens |
-| `--learning-rate` | `1e-5` | Learning rate |
-| `--beta` | `0.01` | KL penalty coefficient |
+| `--learning-rate` | `2e-5` | Learning rate |
+| `--beta` | `0.005` | KL penalty coefficient |
 | `--temperature` | `0.9` | Sampling temperature |
+| `--warmup-ratio` | `0.05` | Fraction of steps for LR warmup |
 | `--curriculum / --no-curriculum` | on | Easy→hard ordering |
 | `--precision` | `bf16` | `bf16`, `fp16`, or `fp32` |
 
@@ -534,7 +608,7 @@ This is a known issue with `transformers` on Python 3.13 + Windows. The training
 |----------|---------|-------------|
 | stage (positional) | required | `smoke`, `sft`, `grpo`, or `all` |
 | `--flavor` | `l40sx1` | GPU type |
-| `--model` | `Qwen/Qwen2.5-1.5B-Instruct` | Base model |
+| `--model` | `Qwen/Qwen2.5-3B-Instruct` | Base model |
 | `--hf-user` | `meancodi` | HF username |
 | `--branch` | `sandeep` | Git branch |
 | `--timeout` | auto | Max runtime |

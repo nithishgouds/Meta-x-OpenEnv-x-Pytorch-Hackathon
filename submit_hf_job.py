@@ -108,10 +108,11 @@ def sft_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
 
 def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
     paths = stage_paths(model, hf_user)
-    # Env-grounded GRPO: batch_size=8, num_generations=8 gives 1 prompt per
-    # micro-batch with 8 completions for richer GRPO advantages. With
-    # grad_accum=2, each optimizer step sees 2 prompts. lr=1e-5 and beta=0.01
-    # allow meaningful policy updates (prior runs had KL≈0.0008 = frozen).
+    # Env-grounded GRPO v2: lr=2e-5 + beta=0.005 → higher KL (policy
+    # diverges more from SFT). Prior run showed KL≈0.005 with lr=1e-5/beta=0.01
+    # which was too conservative. unsafe_penalty re-added at -0.3.
+    # warmup=0.05 smooths early noisy gradients. 500 steps because reward
+    # was still climbing at step 300.
     return (
         f"{shell_prelude(repo_url, branch)} && "
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
@@ -121,9 +122,9 @@ def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 300 --batch-size 8 --grad-accum 2 "
+        "--max-steps 500 --batch-size 8 --grad-accum 2 "
         "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
-        "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
+        "--learning-rate 2e-5 --beta 0.005 --temperature 0.9 --warmup-ratio 0.05"
     )
 
 
@@ -145,9 +146,9 @@ def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> st
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 300 --batch-size 8 --grad-accum 2 "
+        "--max-steps 500 --batch-size 8 --grad-accum 2 "
         "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
-        "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
+        "--learning-rate 2e-5 --beta 0.005 --temperature 0.9 --warmup-ratio 0.05"
     )
 
 
@@ -186,8 +187,8 @@ def main() -> None:
     default_timeouts = {
         "smoke": "20m",
         "sft": "2h",
-        "grpo": "4h",
-        "all": "6h",
+        "grpo": "6h",
+        "all": "8h",
     }
     timeout = args.timeout or default_timeouts[args.stage]
     script = commands[args.stage]()
