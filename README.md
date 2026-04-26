@@ -337,41 +337,54 @@ This means the model learns from **direct interaction with the environment**, no
 
 ### Training Results
 
+Training results and evaluation plots will be added after the next full training run completes.
+
 ---
 
-## Training Plots (Qwen2.5-3B GRPO Run)
+## Training Plots (Qwen2.5-3B, 300-step GRPO Run)
 
-These plots are from a completed GRPO training run on **Qwen2.5-3B-Instruct** using an L40S GPU. All plots are auto-generated during training and pushed to the HF Hub alongside the model adapter.
+These plots are from a completed GRPO training run on **Qwen2.5-3B-Instruct** (300 steps, L40S GPU, ~3 hours). All plots are auto-generated and pushed to the HF Hub alongside the model adapter.
 
-### 1. Reward Curve (Smoothed)
+### Reward — The Primary Signal
 
 ![Reward Smoothed](plots/grpo_reward_smoothed.png)
 
-**The single most important training signal.** This plot shows the environment reward smoothed over a rolling window to filter out per-step noise. A clear upward trend from the start of training confirms that the policy is learning to take better actions — choosing correct investigation steps, routing to the right domain agent, and following safe sequencing. Flat or declining reward would indicate the model is stuck or degenerating. In GRPO, reward is the *only* ground-truth signal — unlike supervised learning, there are no labels to memorize, so this curve directly reflects the agent's improving decision quality inside the environment.
+**The most important plot.** Smoothed reward trends clearly upward from ~0.22 to ~0.40 over 300 steps — the model is learning to take better actions in the environment.
 
-### 2. Loss Curve
-
-![Loss](plots/grpo_loss_only.png)
-
-**Expected to oscillate near zero — this is not SFT.** In GRPO, the loss is computed from group-relative advantages (completions scored above/below the group mean). Because advantages are zero-centered by construction, the loss naturally hovers around zero rather than declining monotonically. Large spikes indicate the model encountered a particularly informative batch (high reward variance between completions). A loss that drifts steadily negative or explodes positive signals a training instability. The key insight: **do not expect a declining loss curve in GRPO** — look at the reward curve instead.
-
-### 3. Quality Metrics (Smoothed)
-
-![Quality Snapshot](plots/grpo_final_quality_snapshot.png)
-
-**A multi-dimensional view of the agent's operational quality.** This plot tracks several metrics simultaneously: `valid_json_rate` (does the model produce parseable JSON?), `accuracy` (does it pick the correct gold action?), `agent_accuracy` (does it route to the correct domain specialist?), and `unsafe_rate` (does it choose penalized/dangerous actions?). Healthy training shows valid_json_rate near 100% (the model learned formatting from SFT), accuracy and agent_accuracy trending upward, and unsafe_rate trending downward. This plot reveals *what* the model is learning, while the reward curve shows *how much*.
-
-### 4. KL Divergence
+### KL Divergence — Is the Policy Learning?
 
 ![KL Divergence](plots/grpo_kl_only.png)
 
-**Measures how far the policy has drifted from the SFT baseline.** KL divergence between the current policy and the frozen SFT reference model should rise gradually — this confirms the model is exploring new behavior rather than staying frozen at the supervised starting point. KL that stays flat near zero means the model isn't learning. KL that spikes too high means the policy has diverged too far and may be generating incoherent outputs. The `beta` hyperparameter (KL penalty coefficient) controls this tradeoff: our setting of β=0.005 allows meaningful exploration while preventing catastrophic drift.
+KL between current policy and SFT reference rises steadily from 0 to ~0.005-0.008. This confirms the model is exploring new behavior rather than staying frozen at the SFT baseline.
 
-### 5. Reward vs KL
+### Quality Metrics — Accuracy & Safety
 
-![Reward vs KL](plots/grpo_reward_vs_kl.png)
+![Quality Metrics](plots/grpo_quality_metrics.png)
 
-**The efficiency of exploration — are we getting reward for our KL budget?** This plot overlays the reward curve and KL divergence on the same time axis. The ideal pattern is reward rising *faster* than KL — meaning the model is finding better actions without diverging excessively from the reference. If KL rises but reward stays flat, the model is exploring randomly. If reward rises while KL stays near zero, the model is improving within its existing behavior space (unlikely to continue). A healthy GRPO run shows both curves rising, with reward leading KL, confirming that the policy updates are efficient and targeted.
+- **valid_json_rate** (~97%): Model almost always produces well-formed JSON
+- **accuracy** (~55-60%): Correct gold action picked more than half the time
+- **agent_accuracy** (~65%): Correct domain agent routing
+- **unsafe_rate** (~15%): Still too high — fixed by re-adding `unsafe_penalty` for the next run
+
+### Reward Component Breakdown
+
+![Reward Components](plots/grpo_reward_components.png)
+
+The env_reward (main environment signal) dominates the reward. Parse and format penalties are near zero — the model learned valid output formatting from SFT.
+
+### Key Environment Signals
+
+![Action Quality](plots/grpo_component_env_action_quality.png)
+
+Action quality trends upward (0.05 → 0.10) — the model picks increasingly appropriate actions.
+
+![Coordination](plots/grpo_component_env_coordination_reward.png)
+
+Coordination reward stabilized near the ceiling (~0.14 of 0.15 max) early — the model quickly learned which domain agent should handle each action.
+
+![Sequencing](plots/grpo_component_env_sequencing_reward.png)
+
+Sequencing reward trends upward (0.06 → 0.10) — the model is learning to investigate before remediating, following the correct causal order.
 
 ---
 
