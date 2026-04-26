@@ -1,0 +1,14 @@
+{
+  "grpo_reward_only.png": "Raw reward over GRPO training steps.",
+  "grpo_reward_smoothed.png": "Reward with moving average to show trend more clearly.",
+  "grpo_loss_only.png": "GRPO loss over training steps.",
+  "grpo_kl_only.png": "KL stability during GRPO optimization.",
+  "grpo_reward_vs_kl.png": "Reward trend compared against KL drift.",
+  "grpo_reward_components.png": "All reward components logged during GRPO training.",
+  "grpo_quality_metrics.png": "JSON validity, action accuracy, agent accuracy, and unsafe rate across training.",
+  "grpo_json_accuracy.png": "Core behavioral quality metrics for the trained policy.",
+  "grpo_unsafe_rate.png": "Unsafe action rate across logged GRPO batches.",
+  "sft_train_loss.png": "Supervised fine-tuning loss over training steps.",
+  "sft_eval_loss.png": "Validation loss during SFT.",
+  "sft_train_vs_eval_loss.png": "Train versus validation loss during SFT."
+}

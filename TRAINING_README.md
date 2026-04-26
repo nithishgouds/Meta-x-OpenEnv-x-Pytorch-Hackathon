@@ -87,16 +87,16 @@ This creates `data/generated/sft_train.jsonl`, `sft_val.jsonl`, and `grpo_prompt
 ### Step 2: SFT smoke test (10 steps)
 
 ```bash
-python train_sft.py \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --train-file data/generated/sft_train.jsonl \
-  --val-file data/generated/sft_val.jsonl \
-  --output-dir outputs/smoke-sft \
-  --max-steps 10 \
-  --batch-size 1 \
-  --grad-accum 1 \
-  --max-seq-length 1024 \
-  --logging-steps 1 \
+python train_sft.py 
+  --model Qwen/Qwen2.5-1.5B-Instruct 
+  --train-file data/generated/sft_train.jsonl 
+  --val-file data/generated/sft_val.jsonl 
+  --output-dir outputs/smoke-sft 
+  --max-steps 10 
+  --batch-size 1
+  --grad-accum 1 
+  --max-seq-length 1024 
+  --logging-steps 1 
   --save-steps 10
 ```
 

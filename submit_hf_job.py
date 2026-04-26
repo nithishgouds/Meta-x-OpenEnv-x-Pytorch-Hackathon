@@ -50,17 +50,45 @@ def shell_prelude(repo_url: str, branch: str) -> str:
     )
 
 
+# def smoke_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
+#     paths = stage_paths(model, hf_user)
+#     return (
+#         f"{shell_prelude(repo_url, branch)} && "
+#         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
+#         f"python train_sft.py --model {model} "
+#         "--train-file data/generated/sft_train.jsonl "
+#         "--val-file data/generated/sft_val.jsonl "
+#         f"--output-dir {paths['smoke_output']} "
+#         f"--hub-model-id {paths['smoke_repo']} "
+#         "--max-steps 10 --batch-size 1 --grad-accum 1 --max-seq-length 1024"
+#     )
+
 def smoke_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
     paths = stage_paths(model, hf_user)
     return (
         f"{shell_prelude(repo_url, branch)} && "
+
+        # Dataset (run once)
         "python generate_sft_dataset.py --input tasks/cascade.json --output-dir data/generated --validate && "
+
+        # SFT smoke
         f"python train_sft.py --model {model} "
         "--train-file data/generated/sft_train.jsonl "
         "--val-file data/generated/sft_val.jsonl "
         f"--output-dir {paths['smoke_output']} "
         f"--hub-model-id {paths['smoke_repo']} "
-        "--max-steps 10 --batch-size 1 --grad-accum 1 --max-seq-length 1024"
+        "--max-steps 10 --batch-size 1 --grad-accum 1 --max-seq-length 512 && "
+
+        # GRPO smoke (lightweight)
+        f"python train_grpo.py --model {model} "
+        f"--sft-adapter {paths['smoke_repo']} "
+        "--input tasks/cascade.json "
+        "--prompt-file data/generated/grpo_prompts.jsonl "
+        f"--output-dir {paths['smoke_output']}-grpo "
+        f"--hub-model-id {paths['smoke_repo']}-grpo "
+        "--max-steps 5 --batch-size 2 --grad-accum 1 "
+        "--num-generations 2 --max-completion-length 128 --max-prompt-length 512 "
+        "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
     )
 
 
@@ -93,7 +121,7 @@ def grpo_command(repo_url: str, branch: str, model: str, hf_user: str) -> str:
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 250 --batch-size 8 --grad-accum 2 "
+        "--max-steps 300 --batch-size 8 --grad-accum 2 "
         "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
         "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
     )
@@ -117,7 +145,7 @@ def combined_command(repo_url: str, branch: str, model: str, hf_user: str) -> st
         "--prompt-file data/generated/grpo_prompts.jsonl "
         f"--output-dir {paths['grpo_output']} "
         f"--hub-model-id {paths['grpo_repo']} "
-        "--max-steps 250 --batch-size 8 --grad-accum 2 "
+        "--max-steps 300 --batch-size 8 --grad-accum 2 "
         "--num-generations 8 --max-completion-length 384 --max-prompt-length 1536 "
         "--learning-rate 1e-5 --beta 0.01 --temperature 0.9"
     )
@@ -139,7 +167,7 @@ def main() -> None:
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--namespace", default=os.environ.get("HF_USER", "meancodi"))
     parser.add_argument("--hf-user", default=os.environ.get("HF_USER", "meancodi"))
-    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-1.5B-Instruct"))
+    parser.add_argument("--model", default=os.environ.get("MODEL", "Qwen/Qwen2.5-3B-Instruct"))
     parser.add_argument("--repo-url", default=os.environ.get("REPO_URL", "https://github.com/nithishgouds/Meta-x-OpenEnv-x-Pytorch-Hackathon.git"))
     parser.add_argument("--branch", default=os.environ.get("REPO_BRANCH", "sandeep"))
     parser.add_argument("--dry-run", action="store_true")
