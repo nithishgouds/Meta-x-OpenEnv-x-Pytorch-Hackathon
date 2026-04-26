@@ -1,15 +1,3 @@
----
-title: OpsSim-AI
-emoji: 🚨
-colorFrom: red
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
-tags:
-  - openenv
----
-
 # OpsSim-AI: Teaching LLMs to Run a Production War Room
 
 When a checkout system starts throwing 500 errors at 2 AM, the cause is rarely obvious. A Redis cache failure may be triggering payment timeouts, which leave stale database connections, which make it tempting to restart the wrong service too early — making everything worse.
@@ -20,9 +8,23 @@ Real incident response requires a team of specialists who each see only part of 
 
 ## Additional Resources
 
-- 📹 **Demo Video:** [Coming soon]
+- 🔗 **GitHub:** [nithishgouds/Meta-X-OpenEnv-X-Pytorch-Hackathon](https://github.com/nithishgouds/Meta-X-OpenEnv-X-Pytorch-Hackathon)
+
 - 📝 **Blog Post:** [Coming soon]
-- 📊 **Slides:** [Coming soon]
+
+---
+
+## Demo
+
+🔗 **Hugging Face Space:** [Coming soon — link will be added here]
+
+The demo lets you:
+
+- Select a cascading failure scenario
+- Watch the agent team diagnose and resolve the incident step by step
+- See the 13-component reward breakdown at each step
+- Compare agent decisions against the optimal recovery path
+- View the war room's incident channel and communication flow
 
 ---
 
@@ -204,20 +206,6 @@ Most agent benchmarks test a single capability: tool use, code generation, or qu
 - **Recovery from mistakes** — the Supervisor can veto, and the agent must adapt
 
 This makes OpsSim-AI a compact but meaningful testbed for studying whether LLM agents can move from "answering correctly" toward **operating responsibly** in complex systems.
-
----
-
-## Demo
-
-🔗 **Hugging Face Space:** [Coming soon — link will be added here]
-
-The demo lets you:
-
-- Select a cascading failure scenario
-- Watch the agent team diagnose and resolve the incident step by step
-- See the 13-component reward breakdown at each step
-- Compare agent decisions against the optimal recovery path
-- View the war room's incident channel and communication flow
 
 ---
 
