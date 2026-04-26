@@ -27,6 +27,7 @@
     "outputs/grpo-qwen25-3b/plots/grpo_component_quality_metrics.png",
     "outputs/grpo-qwen25-3b/plots/grpo_component_parse_penalty.png",
     "outputs/grpo-qwen25-3b/plots/grpo_component_format_penalty.png",
+    "outputs/grpo-qwen25-3b/plots/grpo_component_unsafe_penalty.png",
     "outputs/grpo-qwen25-3b/plots/grpo_quality_metrics.png",
     "outputs/grpo-qwen25-3b/plots/grpo_quality_metrics_smoothed.png",
     "outputs/grpo-qwen25-3b/plots/grpo_json_accuracy.png",
