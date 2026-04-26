@@ -18,6 +18,12 @@ Real incident response requires a team of specialists who each see only part of 
 
 **OpsSim-AI** is an environment that turns this kind of messy, multi-team incident into a structured training ground for LLM agents.
 
+## Additional Resources
+
+- 📹 **Demo Video:** [Coming soon]
+- 📝 **Blog Post:** [Coming soon]
+- 📊 **Slides:** [Coming soon]
+
 ---
 
 ## The Problem
@@ -37,7 +43,7 @@ Most LLM benchmarks test none of this. They give the agent full state, a single 
 
 ## What This Environment Does
 
-OpsSim-AI simulates a **distributed war room** with 9 agents responding to cascading production failures across 10 realistic scenarios.
+OpsSim-AI simulates a **distributed war room** with 9 agents responding to cascading production failures across 10 realistic scenarios. (Theme #1 - Multi-Agent Interactions)
 
 ### The Agents
 
@@ -53,7 +59,7 @@ OpsSim-AI simulates a **distributed war room** with 9 agents responding to casca
 - **Cascading failures.** A single root cause (e.g., a bad canary deploy) spreads across multiple domains. The system keeps degrading while agents deliberate — every step costs time.
 - **Strict responsibility boundaries.** If the IC tells AppOps to fix a database issue, the environment applies a severe penalty. Agents must delegate to the correct domain owner.
 - **Unsafe temptations.** Each scenario includes plausible-sounding but harmful actions (force-restart, flush DNS, kill transactions). Choosing them carries penalties.
-- **Long recovery sequences.** Many scenarios require 5-8 ordered steps: investigate → diagnose root cause → satisfy preconditions → remediate → verify. Skipping steps or acting out of order reduces the reward.
+- **Long recovery sequences.** Many scenarios require 5-8 ordered steps: investigate → diagnose root cause → satisfy preconditions → remediate → verify. Skipping steps or acting out of order reduces the reward. (Theme #2 - (Super) Long-Horizon Planning & Instruction Following)
 
 ### The 10 Scenarios
 
@@ -191,7 +197,7 @@ This creates a total training reward range of approximately **[-2.05, +1.50]**, 
 
 Most agent benchmarks test a single capability: tool use, code generation, or question answering. OpsSim-AI tests several capabilities simultaneously, in a setting where they interact:
 
-- **Diagnosis under partial information** — the agent must reason about what it *cannot* see
+- **Diagnosis under partial information** — the agent must reason about what it *cannot* see (Theme #3 - World Modeling, Theme #3.1 Professional Tasks)
 - **Multi-step planning** — early investigation steps only pay off several actions later
 - **Coordination across specialists** — choosing the right expert matters as much as choosing the right action
 - **Safety discipline** — resisting harmful shortcuts that look plausible
@@ -217,7 +223,7 @@ The demo lets you:
 
 ## Training Pipeline
 
-OpsSim-AI includes a full **SFT → GRPO** training pipeline that takes raw scenario definitions and produces a fine-tuned LLM that makes better incident response decisions.
+OpsSim-AI includes a full **SFT → GRPO** training pipeline that takes raw scenario definitions and produces a fine-tuned LLM that makes better incident response decisions. (Theme #4 - Self-Improvement)
 
 ### End-to-End Flow
 
@@ -263,7 +269,7 @@ OpsSim-AI includes a full **SFT → GRPO** training pipeline that takes raw scen
 scenario_id             → unique identifier (e.g. "cascade_001_checkout_meltdown")
 description             → one-line incident summary
 initial_state           → dict of system variables (e.g. checkout: "failing", redis: "offline")
-playbook_text           → investigation/remediation runbook for the IC
+playbook_text           → investigation/remediation runbook for the IC; in large enterprises, these playbook guidelines can represent business rules and operational policies the IC is expected to follow
 available_actions       → all possible actions the agent can take
 optimal_solution_path   → the correct ordered sequence of 5-8 gold actions
 transition_rules        → for each action: preconditions, state effects, reward/else_reward
@@ -427,21 +433,13 @@ python submit_hf_job.py all --flavor l40sx1
 
 ---
 
-## Additional Resources
-
-- 📹 **Demo Video:** [Coming soon]
-- 📝 **Blog Post:** [Coming soon]
-- 📊 **Slides:** [Coming soon]
-
----
-
 ## Conclusion
 
 OpsSim-AI creates a training ground where LLM agents face the same pressures as real incident response teams: partial information, time pressure, dangerous shortcuts, and the need to coordinate across specialists.
 
 The environment rewards agents not just for solving the incident, but for *how* they solve it — investigating before acting, delegating to the right expert, following safe sequences, and communicating efficiently.
 
-We believe this kind of structured, multi-agent, stateful environment is essential for moving LLM agents from answering questions to operating real systems reliably.
+We believe this kind of structured, multi-agent, stateful environment is essential for moving LLM agents from answering questions to operating real systems reliably. (Theme #5: Wild Card - Impress Us!)
 
 ---
 
