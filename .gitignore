@@ -1,3 +1,9 @@
 venv/
 .env
 __pycache__/
+models/
+opssim-grpo-output/
+runs/
+outputs/
+data/generated/
+sft_dataset*.json*

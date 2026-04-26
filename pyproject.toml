@@ -1,17 +1,26 @@
 [project]
 name = "opssim_ai"
-version = "0.1.0"
-description = "RL environment for DevOps simulation"
+version = "2.0.0"
+description = "OpsSim-AI: 9-Agent Distributed War Room — Cascading Failure System"
 requires-python = ">=3.11"
 authors = [{ name = "Sandeep, Venkatesh, Nithish" }]
 dependencies = [
     "pydantic",
+    "huggingface_hub",
     "openai",
     "requests",
     "python-dotenv",
-    "openenv-core @ git+https://github.com/meta-pytorch/OpenEnv.git",
+    "openenv-core==0.2.3",
     "fastapi",
-    "uvicorn"
+    "uvicorn",
+    "torch",
+    "transformers==4.51.3",
+    "trl==0.17.0",
+    "datasets==3.5.0",
+    "peft==0.15.2",
+    "accelerate==1.6.0",
+    "jmespath",
+    "matplotlib==3.9.2"
 ]
 
 [build-system]
@@ -22,7 +31,7 @@ build-backend = "setuptools.build_meta"
 server = "server.app:main"
 
 [tool.setuptools]
-py-modules = ["env", "models", "inference", "multi_agent", "train", "evaluate"]
+py-modules = ["env", "models", "inference", "multi_agent", "train", "train_sft", "train_grpo", "generate_sft_dataset"]
 
 [tool.setuptools.packages.find]
 include = ["server"]

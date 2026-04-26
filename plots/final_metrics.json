@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-04-26T02:32:38",
+  "stage": "grpo",
+  "model": "Qwen/Qwen2.5-3B-Instruct",
+  "sft_adapter": "meancodi/opssim-qwen25-3b-sft-lora",
+  "final_global_step": 300,
+  "final_epoch": 2.0,
+  "num_examples": 4800,
+  "kl_beta": 0.01,
+  "curriculum_used": true,
+  "last_quality_metrics": {
+    "timestamp": "2026-04-26T02:32:31.519464",
+    "valid_json_rate": 1.0,
+    "accuracy": 0.625,
+    "agent_accuracy": 0.75,
+    "unsafe_rate": 0.0625,
+    "env_success_rate": 0.0,
+    "env_sla_fail_rate": 0.0,
+    "env_stepped_rate": 0.9375,
+    "raw_reward_mean": -0.04875
+  }
+}

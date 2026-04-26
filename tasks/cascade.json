@@ -18,20 +18,50 @@
           "root_cause_found": false,
           "secondary_issue_found": false,
           "db_connections_flushed": false
-        }
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "degraded",
+        "message_queue": "backed_up",
+        "service_mesh": "healthy",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
       },
-      "playbook_text": "INCIDENT PROTOCOL: Always investigate before remediating. Check downstream dependencies first. Do not restart services blindly — identify the root cause.",
+      "playbook_text": "INCIDENT PROTOCOL: Always investigate before remediating. Check downstream dependencies first. Do not restart services blindly \u00e2\u20ac\u201d identify the root cause.",
       "available_actions": [
-        "investigate_payment_service",
-        "investigate_database",
+        "analyze_metrics",
+        "check_alerts",
+        "check_network_routes",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "fix_dns_entry",
+        "flush_db_connections",
+        "flush_dns_cache",
         "investigate_cache",
+        "investigate_database",
         "investigate_dns",
+        "investigate_payment_service",
+        "reboot_redis",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
         "restart_checkout",
         "restart_payment_service",
-        "flush_db_connections",
-        "reboot_redis",
-        "fix_dns_entry",
-        "do_nothing"
+        "rotate_credentials",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
       ],
       "penalties": {
         "restart_checkout": -0.5,
@@ -137,11 +167,139 @@
           },
           "reward": 0.0,
           "else_reward": -0.1
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
         }
       },
       "bleed_rules": [
-        {"condition": "checkout_status == 'error_500'", "penalty": -0.08},
-        {"condition": "redis_cache == 'connection_refused'", "penalty": -0.05}
+        {
+          "condition": "checkout_status == 'error_500'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "redis_cache == 'connection_refused'",
+          "penalty": -0.05
+        }
       ],
       "sla_rules": {
         "required": [
@@ -151,7 +309,151 @@
         ],
         "forbidden": []
       },
-      "sla_violation_penalty": -1.0
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "checkout_status",
+          "payment_service",
+          "phase"
+        ],
+        "infra": [
+          "redis_cache",
+          "dns_resolution"
+        ],
+        "database": [
+          "database_pool"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "investigate_payment_service",
+          "restart_checkout",
+          "restart_payment_service"
+        ],
+        "infra": [
+          "investigate_cache",
+          "investigate_dns",
+          "reboot_redis",
+          "fix_dns_entry"
+        ],
+        "database": [
+          "investigate_database",
+          "flush_db_connections"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Redis cache failure causing payment service timeouts and checkout 500 errors",
+      "root_cause_keywords": [
+        "redis",
+        "cache",
+        "payment",
+        "timeout",
+        "checkout",
+        "connection_refused"
+      ],
+      "conflict_pairs": [
+        [
+          "reboot_redis",
+          "investigate_cache"
+        ],
+        [
+          "restart_checkout",
+          "investigate_payment_service"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "checkout_status == error_500",
+          "weight": 0.3
+        },
+        {
+          "condition": "payment_service == timeout_upstream",
+          "weight": 0.25
+        },
+        {
+          "condition": "redis_cache == connection_refused",
+          "weight": 0.2
+        },
+        {
+          "condition": "database_pool == stale_connections",
+          "weight": 0.1
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "checkout_status == error_500",
+            "penalty": 0.1
+          }
+        ],
+        "infra": [
+          {
+            "condition": "redis_cache == connection_refused",
+            "penalty": 0.08
+          }
+        ],
+        "database": [
+          {
+            "condition": "database_pool == stale_connections",
+            "penalty": 0.05
+          }
+        ],
+        "network": [],
+        "security": [],
+        "middleware": [
+          {
+            "condition": "api_gateway_status == degraded",
+            "penalty": 0.03
+          }
+        ],
+        "observability": []
+      }
     },
     {
       "scenario_id": "cascade_002_deploy_gone_wrong",
@@ -174,20 +476,50 @@
           "found_config_mismatch": false,
           "canary_rolled_back": false,
           "old_pods_cleaned": false
-        }
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "degraded",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
       },
       "playbook_text": "DEPLOY PROTOCOL: Never fully rollback without investigating. Check canary logs, then metrics, then pod health. Feature flags may mask issues.",
       "available_actions": [
+        "analyze_metrics",
+        "check_alerts",
         "check_canary_logs",
         "check_latency_metrics",
+        "check_network_routes",
         "check_old_pods",
-        "inspect_feature_flags",
-        "rollback_canary",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
         "force_full_rollback",
+        "inspect_feature_flags",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
         "restart_old_pods",
-        "toggle_feature_flag",
+        "rollback_canary",
+        "rotate_credentials",
         "scale_up_healthy_pods",
-        "do_nothing"
+        "toggle_feature_flag",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
       ],
       "penalties": {
         "force_full_rollback": -0.8
@@ -295,12 +627,143 @@
             "latency_p99": "300ms"
           },
           "reward": -0.8
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
         }
       },
       "bleed_rules": [
-        {"condition": "error_rate == '12%'", "penalty": -0.1},
-        {"condition": "error_rate == '5%'", "penalty": -0.03},
-        {"condition": "old_pods_status == 'zombie_state'", "penalty": -0.05}
+        {
+          "condition": "error_rate == '12%'",
+          "penalty": -0.1
+        },
+        {
+          "condition": "error_rate == '5%'",
+          "penalty": -0.03
+        },
+        {
+          "condition": "old_pods_status == 'zombie_state'",
+          "penalty": -0.05
+        }
       ],
       "sla_rules": {
         "required": [
@@ -311,7 +774,142 @@
           "config_version == 'v2.2.0-old'"
         ]
       },
-      "sla_violation_penalty": -1.0
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "canary_status",
+          "error_rate",
+          "config_version",
+          "feature_flag_state",
+          "memory_leak"
+        ],
+        "infra": [
+          "latency_p99",
+          "old_pods_status"
+        ],
+        "database": [],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "check_canary_logs",
+          "rollback_canary",
+          "force_full_rollback",
+          "inspect_feature_flags",
+          "toggle_feature_flag"
+        ],
+        "infra": [
+          "check_latency_metrics",
+          "check_old_pods",
+          "restart_old_pods",
+          "scale_up_healthy_pods"
+        ],
+        "database": [],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Bad canary deployment with memory leak causing latency spikes and config mismatch",
+      "root_cause_keywords": [
+        "canary",
+        "deploy",
+        "memory",
+        "leak",
+        "latency",
+        "config",
+        "rollback"
+      ],
+      "conflict_pairs": [
+        [
+          "rollback_canary",
+          "scale_up_healthy_pods"
+        ],
+        [
+          "force_full_rollback",
+          "toggle_feature_flag"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "latency_p99 == 800ms",
+          "weight": 0.2
+        },
+        {
+          "condition": "error_rate == 12%",
+          "weight": 0.25
+        },
+        {
+          "condition": "memory_leak == confirmed",
+          "weight": 0.2
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "error_rate == 12%",
+            "penalty": 0.08
+          }
+        ],
+        "infra": [
+          {
+            "condition": "memory_leak == confirmed",
+            "penalty": 0.06
+          }
+        ],
+        "database": [],
+        "network": [],
+        "security": [],
+        "middleware": [
+          {
+            "condition": "service_mesh == degraded",
+            "penalty": 0.04
+          }
+        ],
+        "observability": []
+      }
     },
     {
       "scenario_id": "cascade_003_network_partition",
@@ -332,20 +930,50 @@
           "checked_quorum": false,
           "partition_healed": false,
           "leader_elected": false
-        }
+        },
+        "network_connectivity": "partitioned",
+        "load_balancer_status": "degraded",
+        "dns_latency": "high",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "healthy",
+        "circuit_breakers": "open",
+        "monitoring_status": "active",
+        "alert_state": "normal",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
       },
-      "playbook_text": "PARTITION PROTOCOL: 1) Scan both zones. 2) Check replication lag — if data diverged, do NOT force reconnect. 3) Verify quorum before electing leader. 4) Heal partition only after full diagnosis.",
+      "playbook_text": "PARTITION PROTOCOL: 1) Scan both zones. 2) Check replication lag \u00e2\u20ac\u201d if data diverged, do NOT force reconnect. 3) Verify quorum before electing leader. 4) Heal partition only after full diagnosis.",
       "available_actions": [
+        "analyze_metrics",
+        "check_alerts",
+        "check_network_routes",
+        "check_quorum_status",
+        "check_replication_lag",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "force_leader_zone_a",
+        "force_reconnect",
+        "heal_partition",
+        "reconcile_data",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "rotate_credentials",
         "scan_zone_a",
         "scan_zone_b",
-        "check_replication_lag",
-        "check_quorum_status",
-        "heal_partition",
-        "force_reconnect",
+        "trace_requests",
         "trigger_leader_election",
-        "force_leader_zone_a",
-        "reconcile_data",
-        "do_nothing"
+        "verify_auth_tokens",
+        "verify_load_balancer"
       ],
       "penalties": {
         "force_reconnect": -0.8,
@@ -453,12 +1081,143 @@
             "leader_election": "forced_a"
           },
           "reward": -0.5
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
         }
       },
       "bleed_rules": [
-        {"condition": "partition_detected == true", "penalty": -0.08},
-        {"condition": "leader_election == 'stalled'", "penalty": -0.05},
-        {"condition": "data_consistency == 'corrupted'", "penalty": -0.3}
+        {
+          "condition": "partition_detected == true",
+          "penalty": -0.08
+        },
+        {
+          "condition": "leader_election == 'stalled'",
+          "penalty": -0.05
+        },
+        {
+          "condition": "data_consistency == 'corrupted'",
+          "penalty": -0.3
+        }
       ],
       "sla_rules": {
         "required": [
@@ -470,12 +1229,147 @@
           "data_consistency == 'corrupted'"
         ]
       },
-      "sla_violation_penalty": -1.5
+      "sla_violation_penalty": -1.5,
+      "domain_visibility": {
+        "app": [],
+        "infra": [
+          "partition_detected",
+          "zone_a_status",
+          "zone_b_status",
+          "leader_election",
+          "quorum_status"
+        ],
+        "database": [
+          "data_consistency",
+          "replication_lag"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [],
+        "infra": [
+          "scan_zone_a",
+          "scan_zone_b",
+          "check_quorum_status",
+          "heal_partition",
+          "force_reconnect",
+          "trigger_leader_election",
+          "force_leader_zone_a"
+        ],
+        "database": [
+          "check_replication_lag",
+          "reconcile_data"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Network partition between regions causing cross-region communication failure and data sync loss",
+      "root_cause_keywords": [
+        "network",
+        "partition",
+        "region",
+        "connectivity",
+        "route",
+        "sync",
+        "split"
+      ],
+      "conflict_pairs": [
+        [
+          "force_failover",
+          "attempt_rejoin"
+        ],
+        [
+          "isolate_region",
+          "restore_route"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "cross_region_connectivity == severed",
+          "weight": 0.35
+        },
+        {
+          "condition": "data_sync_status == halted",
+          "weight": 0.25
+        },
+        {
+          "condition": "service_discovery == stale",
+          "weight": 0.15
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "service_discovery == stale",
+            "penalty": 0.05
+          }
+        ],
+        "infra": [],
+        "database": [
+          {
+            "condition": "data_sync_status == halted",
+            "penalty": 0.08
+          }
+        ],
+        "network": [
+          {
+            "condition": "cross_region_connectivity == severed",
+            "penalty": 0.12
+          }
+        ],
+        "security": [],
+        "middleware": [],
+        "observability": []
+      }
     },
     {
       "scenario_id": "cascade_004_storage_corruption_chain",
       "domain": "Storage & Data Infrastructure",
-      "description": "Users report missing files. The storage layer may be corrupted but the extent is unknown. Investigate carefully — wrong actions could cause data loss.",
+      "description": "Users report missing files. The storage layer may be corrupted but the extent is unknown. Investigate carefully \u00e2\u20ac\u201d wrong actions could cause data loss.",
       "initial_state": {
         "primary_storage": "degraded",
         "replica_storage": "unknown",
@@ -491,20 +1385,50 @@
           "checked_wal": false,
           "corruption_mapped": false,
           "recovery_ready": false
-        }
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "stalled",
+        "service_mesh": "healthy",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
       },
       "playbook_text": "DATA INCIDENT PROTOCOL: 1) IMMEDIATELY set read-only mode to prevent further writes. 2) Check WAL before anything. 3) Map corruption extent. 4) Never restore from backup without verifying replica first.",
       "available_actions": [
-        "set_read_only_mode",
+        "analyze_metrics",
+        "check_alerts",
+        "check_backup_integrity",
+        "check_network_routes",
         "check_primary_filesystem",
         "check_replica_status",
-        "check_backup_integrity",
+        "check_ssl_certificates",
         "check_write_ahead_log",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
         "restore_from_backup",
         "restore_from_replica",
-        "run_fsck_repair",
         "resume_writes",
-        "do_nothing"
+        "rotate_credentials",
+        "run_fsck_repair",
+        "set_read_only_mode",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
       ],
       "penalties": {
         "restore_from_backup": -0.6,
@@ -611,12 +1535,143 @@
             "write_ahead_log": "lost"
           },
           "reward": -0.6
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
         }
       },
       "bleed_rules": [
-        {"condition": "primary_storage == 'degraded'", "penalty": -0.05},
-        {"condition": "primary_storage == 'corrupted_worse'", "penalty": -0.3},
-        {"condition": "service_mode == 'normal' AND primary_storage != 'healthy'", "penalty": -0.1}
+        {
+          "condition": "primary_storage == 'degraded'",
+          "penalty": -0.05
+        },
+        {
+          "condition": "primary_storage == 'corrupted_worse'",
+          "penalty": -0.3
+        },
+        {
+          "condition": "service_mode == 'normal' AND primary_storage != 'healthy'",
+          "penalty": -0.1
+        }
       ],
       "sla_rules": {
         "required": [
@@ -628,12 +1683,147 @@
           "write_ahead_log == 'lost'"
         ]
       },
-      "sla_violation_penalty": -1.5
+      "sla_violation_penalty": -1.5,
+      "domain_visibility": {
+        "app": [
+          "service_mode"
+        ],
+        "infra": [],
+        "database": [
+          "primary_storage",
+          "replica_storage",
+          "filesystem_check",
+          "backup_status",
+          "corruption_extent",
+          "write_ahead_log"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "set_read_only_mode",
+          "resume_writes"
+        ],
+        "infra": [],
+        "database": [
+          "check_primary_filesystem",
+          "check_replica_status",
+          "check_backup_integrity",
+          "check_write_ahead_log",
+          "restore_from_backup",
+          "restore_from_replica",
+          "run_fsck_repair"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Primary disk corruption causing replication failure and risk of data loss across storage nodes",
+      "root_cause_keywords": [
+        "storage",
+        "corruption",
+        "disk",
+        "replication",
+        "data",
+        "integrity",
+        "checksum"
+      ],
+      "conflict_pairs": [
+        [
+          "force_rebuild_replica",
+          "restore_from_backup"
+        ],
+        [
+          "failover_to_replica",
+          "repair_primary_disk"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "primary_disk == corrupted",
+          "weight": 0.35
+        },
+        {
+          "condition": "replication_status == broken",
+          "weight": 0.25
+        },
+        {
+          "condition": "data_integrity == at_risk",
+          "weight": 0.3
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [],
+        "infra": [
+          {
+            "condition": "primary_disk == corrupted",
+            "penalty": 0.1
+          }
+        ],
+        "database": [
+          {
+            "condition": "replication_status == broken",
+            "penalty": 0.08
+          }
+        ],
+        "network": [],
+        "security": [
+          {
+            "condition": "data_integrity == at_risk",
+            "penalty": 0.05
+          }
+        ],
+        "middleware": [],
+        "observability": []
+      }
     },
     {
       "scenario_id": "cascade_005_auth_breach_chain",
       "domain": "Security & Identity",
-      "description": "Anomalous login patterns detected. A possible credential breach, but scope is unclear. Investigate the chain: entry point → lateral movement → data access.",
+      "description": "Anomalous login patterns detected. A possible credential breach, but scope is unclear. Investigate the chain: entry point, lateral movement, data access.",
       "initial_state": {
         "alert_type": "anomalous_logins",
         "compromised_accounts": "unknown",
@@ -650,20 +1840,50 @@
           "checked_api_keys": false,
           "accounts_locked": false,
           "keys_rotated": false
-        }
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "compromised",
+        "ssl_certificates": "valid",
+        "firewall_rules": "disabled",
+        "access_controls": "bypassed",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "healthy",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
       },
-      "playbook_text": "SECURITY INCIDENT RESPONSE: 1) Analyze login anomalies to identify compromised accounts. 2) Trace lateral movement. 3) Check data access logs. 4) Lock compromised accounts. 5) Rotate exposed API keys. Do NOT rotate keys before identifying which are compromised — you'll cause an outage.",
+      "playbook_text": "SECURITY INCIDENT RESPONSE: 1) Analyze login anomalies to identify compromised accounts. 2) Trace lateral movement. 3) Check data access logs. 4) Lock compromised accounts. 5) Rotate exposed API keys. Do NOT rotate keys before identifying which are compromised.",
       "available_actions": [
         "analyze_login_anomalies",
-        "trace_lateral_movement",
+        "analyze_metrics",
         "audit_data_access_logs",
-        "check_mfa_bypass",
+        "check_alerts",
         "check_api_key_usage",
+        "check_mfa_bypass",
+        "check_network_routes",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_enhanced_monitoring",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
         "lock_compromised_accounts",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
         "rotate_all_api_keys",
         "rotate_compromised_keys",
-        "enable_enhanced_monitoring",
-        "do_nothing"
+        "rotate_credentials",
+        "trace_lateral_movement",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
       ],
       "penalties": {
         "rotate_all_api_keys": -0.7
@@ -763,12 +1983,143 @@
           "else_effects": {},
           "reward": 0.2,
           "else_reward": -0.05
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
         }
       },
       "bleed_rules": [
-        {"condition": "compromised_accounts == '3_service_accounts'", "penalty": -0.1},
-        {"condition": "lateral_movement == 'detected_2_hops'", "penalty": -0.08},
-        {"condition": "data_exfiltration == 'completed'", "penalty": -0.5}
+        {
+          "condition": "compromised_accounts == '3_service_accounts'",
+          "penalty": -0.1
+        },
+        {
+          "condition": "lateral_movement == 'detected_2_hops'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "data_exfiltration == 'completed'",
+          "penalty": -0.5
+        }
       ],
       "sla_rules": {
         "required": [
@@ -781,7 +2132,2667 @@
           "data_exfiltration == 'completed'"
         ]
       },
-      "sla_violation_penalty": -1.5
+      "sla_violation_penalty": -1.5,
+      "domain_visibility": {
+        "app": [
+          "api_keys_status",
+          "incident_contained"
+        ],
+        "infra": [
+          "alert_type",
+          "mfa_status"
+        ],
+        "database": [
+          "compromised_accounts",
+          "lateral_movement",
+          "data_exfiltration"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "check_api_key_usage",
+          "rotate_compromised_keys",
+          "rotate_all_api_keys",
+          "enable_enhanced_monitoring"
+        ],
+        "infra": [
+          "check_mfa_bypass"
+        ],
+        "database": [
+          "analyze_login_anomalies",
+          "trace_lateral_movement",
+          "audit_data_access_logs",
+          "lock_compromised_accounts"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Credential breach via exposed API key causing unauthorized access and requiring emergency lockdown",
+      "root_cause_keywords": [
+        "credential",
+        "breach",
+        "auth",
+        "unauthorized",
+        "access",
+        "api_key",
+        "token",
+        "compromise"
+      ],
+      "conflict_pairs": [
+        [
+          "revoke_api_keys",
+          "restore_service_access"
+        ],
+        [
+          "enable_emergency_lockdown",
+          "restore_service_access"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "auth_status == compromised",
+          "weight": 0.35
+        },
+        {
+          "condition": "access_audit == suspicious_activity",
+          "weight": 0.25
+        },
+        {
+          "condition": "api_keys == exposed",
+          "weight": 0.3
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "service_access == locked_out",
+            "penalty": 0.06
+          }
+        ],
+        "infra": [],
+        "database": [],
+        "network": [],
+        "security": [
+          {
+            "condition": "auth_status == compromised",
+            "penalty": 0.12
+          },
+          {
+            "condition": "api_keys == exposed",
+            "penalty": 0.1
+          }
+        ],
+        "middleware": [],
+        "observability": []
+      }
+    },
+    {
+      "scenario_id": "cascade_006_network_outage_cascade",
+      "domain": "Cloud Infrastructure",
+      "description": "Core network switch failure detected. Database connections are timing out and API errors are spiking. Multiple domains affected \u00e2\u20ac\u201d coordinate investigation across network, database, and application layers.",
+      "initial_state": {
+        "core_switch_status": "failed",
+        "bgp_session": "unknown",
+        "link_aggregation": "unknown",
+        "dns_resolution": "intermittent",
+        "cdn_edge_status": "unknown",
+        "db_connection_status": "timeout",
+        "query_timeout_rate": "85%",
+        "replication_status": "unknown",
+        "connection_pool_utilization": "98%",
+        "api_status": "degraded",
+        "error_rate_5xx": "45%",
+        "user_sessions_active": "dropping",
+        "checkout_processing": "failing",
+        "discovered": {
+          "switch_diagnosed": false,
+          "bgp_checked": false,
+          "cdn_checked": false,
+          "db_connectivity_checked": false,
+          "replication_checked": false,
+          "switch_failed_over": false,
+          "db_pool_restarted": false,
+          "api_recovered": false
+        },
+        "network_connectivity": "degraded",
+        "load_balancer_status": "rerouting",
+        "dns_latency": "high",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "healthy",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
+      },
+      "playbook_text": "NETWORK INCIDENT: 1) Diagnose core switch before failover. 2) Check BGP sessions for route flapping. 3) After switch is stable, restart DB connection pools. 4) Only restart API pods after DB connections are healthy. Blind restarts will cause connection storms.",
+      "available_actions": [
+        "analyze_metrics",
+        "check_alerts",
+        "check_cdn_health",
+        "check_db_connectivity",
+        "check_network_routes",
+        "check_replication_health",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "diagnose_switch",
+        "disable_checkout",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "enable_maintenance_page",
+        "enable_read_replica",
+        "failover_switch",
+        "fix_bgp_routes",
+        "flush_bgp_routes",
+        "flush_dns_cache",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "restart_api_pods",
+        "restart_connection_pool",
+        "restart_dns_resolver",
+        "rotate_credentials",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
+      ],
+      "penalties": {
+        "failover_switch": -0.5,
+        "restart_api_pods": -0.3
+      },
+      "optimal_solution_path": [
+        "diagnose_switch",
+        "flush_bgp_routes",
+        "failover_switch",
+        "check_db_connectivity",
+        "restart_connection_pool",
+        "check_replication_health",
+        "restart_api_pods"
+      ],
+      "transition_rules": {
+        "diagnose_switch": {
+          "condition": "discovered.switch_diagnosed == false",
+          "effects": {
+            "discovered.switch_diagnosed": true,
+            "core_switch_status": "hardware_fault_identified"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "flush_bgp_routes": {
+          "condition": "discovered.switch_diagnosed == true AND discovered.bgp_checked == false",
+          "effects": {
+            "discovered.bgp_checked": true,
+            "bgp_session": "stable",
+            "link_aggregation": "active"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "failover_switch": {
+          "condition": "discovered.switch_diagnosed == true AND bgp_session == 'stable'",
+          "effects": {
+            "core_switch_status": "backup_active",
+            "dns_resolution": "healthy",
+            "discovered.switch_failed_over": true
+          },
+          "else_effects": {
+            "core_switch_status": "failed_worse",
+            "dns_resolution": "down"
+          },
+          "reward": 0.3,
+          "else_reward": -0.5
+        },
+        "check_db_connectivity": {
+          "condition": "discovered.switch_failed_over == true AND discovered.db_connectivity_checked == false",
+          "effects": {
+            "discovered.db_connectivity_checked": true,
+            "db_connection_status": "reconnecting",
+            "query_timeout_rate": "40%"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "restart_connection_pool": {
+          "condition": "discovered.db_connectivity_checked == true",
+          "effects": {
+            "connection_pool_utilization": "30%",
+            "db_connection_status": "healthy",
+            "query_timeout_rate": "2%",
+            "discovered.db_pool_restarted": true
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.2
+        },
+        "check_replication_health": {
+          "condition": "discovered.db_pool_restarted == true AND discovered.replication_checked == false",
+          "effects": {
+            "discovered.replication_checked": true,
+            "replication_status": "healthy"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "restart_api_pods": {
+          "condition": "db_connection_status == 'healthy' AND replication_status == 'healthy'",
+          "effects": {
+            "api_status": "healthy",
+            "error_rate_5xx": "0.5%",
+            "user_sessions_active": "recovering",
+            "checkout_processing": "online",
+            "discovered.api_recovered": true
+          },
+          "else_effects": {
+            "error_rate_5xx": "60%",
+            "api_status": "crash_loop"
+          },
+          "reward": 0.3,
+          "else_reward": -0.3
+        },
+        "enable_maintenance_page": {
+          "condition": "error_rate_5xx == '45%'",
+          "effects": {
+            "user_sessions_active": "paused"
+          },
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "restart_dns_resolver": {
+          "condition": "dns_resolution == 'intermittent'",
+          "effects": {
+            "dns_resolution": "recovering"
+          },
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_cdn_health": {
+          "condition": "discovered.cdn_checked == false",
+          "effects": {
+            "discovered.cdn_checked": true,
+            "cdn_edge_status": "degraded_upstream"
+          },
+          "reward": 0.05,
+          "else_reward": -0.05
+        },
+        "enable_read_replica": {
+          "condition": "db_connection_status == 'timeout'",
+          "effects": {
+            "query_timeout_rate": "60%"
+          },
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "disable_checkout": {
+          "condition": "checkout_processing == 'failing'",
+          "effects": {
+            "checkout_processing": "disabled"
+          },
+          "reward": -0.1
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "core_switch_status == 'failed'",
+          "penalty": -0.1
+        },
+        {
+          "condition": "error_rate_5xx == '45%'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "db_connection_status == 'timeout'",
+          "penalty": -0.06
+        },
+        {
+          "condition": "core_switch_status == 'failed_worse'",
+          "penalty": -0.2
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "api_status == 'healthy'",
+          "db_connection_status == 'healthy'"
+        ],
+        "forbidden": [
+          "core_switch_status == 'failed_worse'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "api_status",
+          "error_rate_5xx",
+          "user_sessions_active",
+          "checkout_processing"
+        ],
+        "infra": [
+          "core_switch_status",
+          "bgp_session",
+          "link_aggregation",
+          "dns_resolution",
+          "cdn_edge_status"
+        ],
+        "database": [
+          "db_connection_status",
+          "query_timeout_rate",
+          "replication_status",
+          "connection_pool_utilization"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "enable_maintenance_page",
+          "restart_api_pods",
+          "disable_checkout"
+        ],
+        "infra": [
+          "diagnose_switch",
+          "failover_switch",
+          "flush_bgp_routes",
+          "restart_dns_resolver",
+          "check_cdn_health"
+        ],
+        "database": [
+          "check_db_connectivity",
+          "restart_connection_pool",
+          "enable_read_replica",
+          "check_replication_health"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "BGP route failure causing CDN outage and cascading routing failures across edge nodes",
+      "root_cause_keywords": [
+        "bgp",
+        "route",
+        "cdn",
+        "network",
+        "outage",
+        "edge",
+        "routing"
+      ],
+      "conflict_pairs": [
+        [
+          "force_bgp_reconvergence",
+          "switch_to_backup_routes"
+        ],
+        [
+          "disable_cdn_cache",
+          "flush_cdn_cache"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "bgp_status == route_leak",
+          "weight": 0.35
+        },
+        {
+          "condition": "cdn_status == offline",
+          "weight": 0.25
+        },
+        {
+          "condition": "edge_routing == broken",
+          "weight": 0.2
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "user_facing_status == degraded",
+            "penalty": 0.06
+          }
+        ],
+        "infra": [
+          {
+            "condition": "cdn_status == offline",
+            "penalty": 0.08
+          }
+        ],
+        "database": [],
+        "middleware": [],
+        "network": [
+          {
+            "condition": "bgp_status == route_leak",
+            "penalty": 0.12
+          },
+          {
+            "condition": "edge_routing == broken",
+            "penalty": 0.08
+          }
+        ],
+        "security": [],
+        "observability": []
+      }
+    },
+    {
+      "scenario_id": "cascade_007_database_overload_chain",
+      "domain": "Database & Application",
+      "description": "Database lock contention is escalating. API response times are through the roof and payment processing is failing. Revenue is dropping every minute this continues.",
+      "initial_state": {
+        "connection_pool_pct": "95%",
+        "active_queries": 847,
+        "lock_contention_count": 234,
+        "slow_query_count": 156,
+        "deadlock_count": 12,
+        "replication_lag_ms": 4500,
+        "api_error_rate": "38%",
+        "api_p99_latency": "12000ms",
+        "active_users": 15000,
+        "order_processing_status": "stalled",
+        "revenue_per_minute": "$0",
+        "cpu_utilization": "92%",
+        "memory_utilization": "88%",
+        "disk_iops": "maxed",
+        "discovered": {
+          "slow_queries_analyzed": false,
+          "long_queries_killed": false,
+          "locks_cleared": false,
+          "circuit_breaker_enabled": false,
+          "indexes_optimized": false,
+          "resources_checked": false
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "degraded",
+        "message_queue": "processing",
+        "service_mesh": "healthy",
+        "circuit_breakers": "open",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
+      },
+      "playbook_text": "DB OVERLOAD PROTOCOL: 1) Analyze slow queries to identify the bottleneck. 2) Kill long-running queries blocking others. 3) Clear lock contention. 4) Enable application circuit breakers to reduce DB pressure. 5) Only optimize indexes after load is reduced. Do NOT scale infrastructure before clearing the lock storm.",
+      "available_actions": [
+        "add_read_replica",
+        "analyze_metrics",
+        "analyze_slow_queries",
+        "check_alerts",
+        "check_network_routes",
+        "check_resource_usage",
+        "check_ssl_certificates",
+        "clear_lock_contention",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_circuit_breaker",
+        "enable_firewall_rules",
+        "enable_queue_mode",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "kill_long_queries",
+        "optimize_indexes",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "restart_replication",
+        "rotate_credentials",
+        "scale_api_pods",
+        "scale_db_instance",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
+      ],
+      "penalties": {
+        "scale_db_instance": -0.5,
+        "add_read_replica": -0.3
+      },
+      "optimal_solution_path": [
+        "analyze_slow_queries",
+        "kill_long_queries",
+        "clear_lock_contention",
+        "enable_circuit_breaker",
+        "optimize_indexes",
+        "restart_replication"
+      ],
+      "transition_rules": {
+        "analyze_slow_queries": {
+          "condition": "discovered.slow_queries_analyzed == false",
+          "effects": {
+            "discovered.slow_queries_analyzed": true,
+            "slow_query_count": 156
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "kill_long_queries": {
+          "condition": "discovered.slow_queries_analyzed == true AND discovered.long_queries_killed == false",
+          "effects": {
+            "discovered.long_queries_killed": true,
+            "active_queries": 320,
+            "slow_query_count": 23,
+            "cpu_utilization": "71%",
+            "api_p99_latency": "6000ms"
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.15
+        },
+        "clear_lock_contention": {
+          "condition": "discovered.long_queries_killed == true AND discovered.locks_cleared == false",
+          "effects": {
+            "discovered.locks_cleared": true,
+            "lock_contention_count": 8,
+            "deadlock_count": 0,
+            "connection_pool_pct": "55%",
+            "api_error_rate": "12%",
+            "disk_iops": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "enable_circuit_breaker": {
+          "condition": "discovered.locks_cleared == true AND discovered.circuit_breaker_enabled == false",
+          "effects": {
+            "discovered.circuit_breaker_enabled": true,
+            "api_error_rate": "3%",
+            "api_p99_latency": "800ms",
+            "order_processing_status": "recovering",
+            "revenue_per_minute": "$2400"
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.1
+        },
+        "optimize_indexes": {
+          "condition": "discovered.circuit_breaker_enabled == true AND discovered.indexes_optimized == false",
+          "effects": {
+            "discovered.indexes_optimized": true,
+            "active_queries": 120,
+            "slow_query_count": 2,
+            "api_p99_latency": "200ms",
+            "order_processing_status": "healthy",
+            "revenue_per_minute": "$8500"
+          },
+          "else_effects": {
+            "cpu_utilization": "96%"
+          },
+          "reward": 0.2,
+          "else_reward": -0.3
+        },
+        "restart_replication": {
+          "condition": "discovered.indexes_optimized == true",
+          "effects": {
+            "replication_lag_ms": 50,
+            "connection_pool_pct": "35%",
+            "api_error_rate": "0.5%",
+            "memory_utilization": "52%",
+            "cpu_utilization": "45%"
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.2
+        },
+        "check_resource_usage": {
+          "condition": "discovered.resources_checked == false",
+          "effects": {
+            "discovered.resources_checked": true
+          },
+          "reward": 0.05,
+          "else_reward": -0.05
+        },
+        "scale_api_pods": {
+          "condition": "discovered.circuit_breaker_enabled == true",
+          "effects": {
+            "active_users": 15000
+          },
+          "reward": 0.05,
+          "else_reward": -0.1
+        },
+        "enable_queue_mode": {
+          "condition": "order_processing_status == 'stalled'",
+          "effects": {
+            "order_processing_status": "queued"
+          },
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "scale_db_instance": {
+          "condition": "1 == 1",
+          "effects": {
+            "cpu_utilization": "85%"
+          },
+          "reward": -0.5
+        },
+        "add_read_replica": {
+          "condition": "1 == 1",
+          "effects": {
+            "replication_lag_ms": 8000
+          },
+          "reward": -0.3
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "revenue_per_minute == '$0'",
+          "penalty": -0.12
+        },
+        {
+          "condition": "lock_contention_count > 100",
+          "penalty": -0.08
+        },
+        {
+          "condition": "api_error_rate == '38%'",
+          "penalty": -0.06
+        },
+        {
+          "condition": "deadlock_count > 5",
+          "penalty": -0.05
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "order_processing_status == 'healthy'",
+          "api_error_rate == '0.5%'"
+        ],
+        "forbidden": []
+      },
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "api_error_rate",
+          "api_p99_latency",
+          "active_users",
+          "order_processing_status",
+          "revenue_per_minute"
+        ],
+        "infra": [
+          "cpu_utilization",
+          "memory_utilization",
+          "disk_iops"
+        ],
+        "database": [
+          "connection_pool_pct",
+          "active_queries",
+          "lock_contention_count",
+          "slow_query_count",
+          "deadlock_count",
+          "replication_lag_ms"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "enable_circuit_breaker",
+          "scale_api_pods",
+          "enable_queue_mode"
+        ],
+        "infra": [
+          "check_resource_usage",
+          "scale_db_instance",
+          "add_read_replica"
+        ],
+        "database": [
+          "analyze_slow_queries",
+          "kill_long_queries",
+          "optimize_indexes",
+          "clear_lock_contention",
+          "restart_replication"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Runaway query storm causing database connection pool exhaustion and cascading service timeouts",
+      "root_cause_keywords": [
+        "query",
+        "database",
+        "pool",
+        "overload",
+        "timeout",
+        "connection",
+        "storm",
+        "lock"
+      ],
+      "conflict_pairs": [
+        [
+          "kill_runaway_queries",
+          "scale_read_replicas"
+        ],
+        [
+          "flush_connection_pool",
+          "restart_primary_db"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "query_load == critical",
+          "weight": 0.3
+        },
+        {
+          "condition": "connection_pool == exhausted",
+          "weight": 0.25
+        },
+        {
+          "condition": "replication_lag == critical",
+          "weight": 0.2
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "app_response == timing_out",
+            "penalty": 0.06
+          }
+        ],
+        "infra": [],
+        "network": [],
+        "security": [],
+        "database": [
+          {
+            "condition": "connection_pool == exhausted",
+            "penalty": 0.1
+          },
+          {
+            "condition": "query_load == critical",
+            "penalty": 0.08
+          }
+        ],
+        "middleware": [
+          {
+            "condition": "api_gateway_status == degraded",
+            "penalty": 0.04
+          }
+        ],
+        "observability": []
+      }
+    },
+    {
+      "scenario_id": "cascade_008_app_crash_cascade",
+      "domain": "Application & Container Platform",
+      "description": "Application pods are crash-looping due to OOM kills. Each restart creates a database connection storm. The cascading restarts are overwhelming the container runtime.",
+      "initial_state": {
+        "app_memory_mb": 3800,
+        "pod_restart_count": 47,
+        "active_instances": 2,
+        "health_check_status": "failing",
+        "deployment_version": "v4.2.1",
+        "node_memory_pct": "94%",
+        "kubelet_status": "pressure",
+        "container_runtime_status": "stressed",
+        "eviction_count": 5,
+        "active_db_connections": 890,
+        "connection_storm_detected": true,
+        "deadlock_count": 8,
+        "query_queue_depth": 2400,
+        "discovered": {
+          "app_logs_checked": false,
+          "node_health_checked": false,
+          "connection_count_checked": false,
+          "deadlocks_checked": false,
+          "instances_scaled_down": false,
+          "memory_limit_set": false,
+          "connections_killed": false,
+          "pooler_enabled": false
+        },
+        "network_connectivity": "healthy",
+        "load_balancer_status": "active",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "degraded",
+        "circuit_breakers": "open",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
+      },
+      "playbook_text": "OOM CASCADE PROTOCOL: 1) Check app logs for memory leak source. 2) Scale DOWN instances first to stop the restart storm. 3) Set memory limits. 4) Kill idle DB connections to relieve the storm. 5) Enable connection pooler. 6) Only then rollback deployment. Do NOT restart kubelet while connection storm is active.",
+      "available_actions": [
+        "analyze_metrics",
+        "check_alerts",
+        "check_app_logs",
+        "check_connection_count",
+        "check_deadlocks",
+        "check_network_routes",
+        "check_node_health",
+        "check_ssl_certificates",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "drain_node",
+        "enable_connection_pooler",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "kill_idle_connections",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "restart_kubelet",
+        "rollback_deployment",
+        "rotate_credentials",
+        "scale_down_instances",
+        "set_memory_limit",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
+      ],
+      "penalties": {
+        "restart_kubelet": -0.6,
+        "drain_node": -0.4
+      },
+      "optimal_solution_path": [
+        "check_app_logs",
+        "scale_down_instances",
+        "set_memory_limit",
+        "check_connection_count",
+        "kill_idle_connections",
+        "enable_connection_pooler",
+        "rollback_deployment"
+      ],
+      "transition_rules": {
+        "check_app_logs": {
+          "condition": "discovered.app_logs_checked == false",
+          "effects": {
+            "discovered.app_logs_checked": true
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "scale_down_instances": {
+          "condition": "discovered.app_logs_checked == true AND discovered.instances_scaled_down == false",
+          "effects": {
+            "discovered.instances_scaled_down": true,
+            "active_instances": 1,
+            "pod_restart_count": 47,
+            "node_memory_pct": "72%",
+            "kubelet_status": "stable",
+            "eviction_count": 5,
+            "active_db_connections": 450,
+            "connection_storm_detected": false
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.15
+        },
+        "set_memory_limit": {
+          "condition": "discovered.instances_scaled_down == true AND discovered.memory_limit_set == false",
+          "effects": {
+            "discovered.memory_limit_set": true,
+            "app_memory_mb": 1024,
+            "container_runtime_status": "stable"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "check_connection_count": {
+          "condition": "discovered.connection_count_checked == false",
+          "effects": {
+            "discovered.connection_count_checked": true
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "kill_idle_connections": {
+          "condition": "discovered.instances_scaled_down == true AND discovered.connections_killed == false",
+          "effects": {
+            "discovered.connections_killed": true,
+            "active_db_connections": 85,
+            "deadlock_count": 0,
+            "query_queue_depth": 120
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.2
+        },
+        "enable_connection_pooler": {
+          "condition": "discovered.connections_killed == true AND discovered.pooler_enabled == false",
+          "effects": {
+            "discovered.pooler_enabled": true,
+            "active_db_connections": 40,
+            "query_queue_depth": 15
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "rollback_deployment": {
+          "condition": "discovered.memory_limit_set == true AND discovered.pooler_enabled == true",
+          "effects": {
+            "deployment_version": "v4.1.9-stable",
+            "health_check_status": "passing",
+            "active_instances": 4,
+            "pod_restart_count": 0,
+            "app_memory_mb": 512
+          },
+          "else_effects": {
+            "pod_restart_count": 60,
+            "health_check_status": "failing"
+          },
+          "reward": 0.4,
+          "else_reward": -0.5
+        },
+        "check_node_health": {
+          "condition": "discovered.node_health_checked == false",
+          "effects": {
+            "discovered.node_health_checked": true
+          },
+          "reward": 0.05,
+          "else_reward": -0.05
+        },
+        "check_deadlocks": {
+          "condition": "discovered.deadlocks_checked == false",
+          "effects": {
+            "discovered.deadlocks_checked": true
+          },
+          "reward": 0.05,
+          "else_reward": -0.05
+        },
+        "restart_kubelet": {
+          "condition": "1 == 1",
+          "effects": {
+            "kubelet_status": "restarting",
+            "active_instances": 0,
+            "health_check_status": "unknown"
+          },
+          "reward": -0.6
+        },
+        "drain_node": {
+          "condition": "1 == 1",
+          "effects": {
+            "active_instances": 0,
+            "eviction_count": 12
+          },
+          "reward": -0.4
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "connection_storm_detected == true",
+          "penalty": -0.1
+        },
+        {
+          "condition": "health_check_status == 'failing'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "kubelet_status == 'pressure'",
+          "penalty": -0.05
+        },
+        {
+          "condition": "deadlock_count > 5",
+          "penalty": -0.04
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "health_check_status == 'passing'",
+          "connection_storm_detected == false"
+        ],
+        "forbidden": [
+          "active_instances == 0"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "app_memory_mb",
+          "pod_restart_count",
+          "active_instances",
+          "health_check_status",
+          "deployment_version"
+        ],
+        "infra": [
+          "node_memory_pct",
+          "kubelet_status",
+          "container_runtime_status",
+          "eviction_count"
+        ],
+        "database": [
+          "active_db_connections",
+          "connection_storm_detected",
+          "deadlock_count",
+          "query_queue_depth"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "check_app_logs",
+          "set_memory_limit",
+          "rollback_deployment",
+          "scale_down_instances"
+        ],
+        "infra": [
+          "check_node_health",
+          "drain_node",
+          "restart_kubelet"
+        ],
+        "database": [
+          "check_connection_count",
+          "kill_idle_connections",
+          "enable_connection_pooler",
+          "check_deadlocks"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Application out-of-memory crash causing restart loops and cascading dependency failures",
+      "root_cause_keywords": [
+        "oom",
+        "memory",
+        "crash",
+        "restart",
+        "cascade",
+        "out-of-memory",
+        "pod",
+        "loop"
+      ],
+      "conflict_pairs": [
+        [
+          "restart_app_pods",
+          "scale_down_app"
+        ],
+        [
+          "increase_memory_limit",
+          "restart_app_pods"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "app_status == crash_loop",
+          "weight": 0.3
+        },
+        {
+          "condition": "memory_usage == oom_killed",
+          "weight": 0.25
+        },
+        {
+          "condition": "downstream_deps == failing",
+          "weight": 0.2
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "app_status == crash_loop",
+            "penalty": 0.12
+          },
+          {
+            "condition": "memory_usage == oom_killed",
+            "penalty": 0.08
+          }
+        ],
+        "infra": [],
+        "database": [],
+        "network": [],
+        "security": [],
+        "middleware": [
+          {
+            "condition": "circuit_breakers == open",
+            "penalty": 0.05
+          },
+          {
+            "condition": "service_mesh == degraded",
+            "penalty": 0.04
+          }
+        ],
+        "observability": []
+      }
+    },
+    {
+      "scenario_id": "cascade_009_multi_region_failover",
+      "domain": "Multi-Region Infrastructure",
+      "description": "Primary region database has failed. Replication to secondary region is broken. Application is partially serving stale data. Risk of data loss if failover is mishandled.",
+      "initial_state": {
+        "primary_db_status": "down",
+        "secondary_db_status": "stale",
+        "replication_lag_ms": 45000,
+        "data_divergence": "unknown",
+        "wal_status": "unknown",
+        "primary_region_status": "degraded",
+        "secondary_region_status": "healthy",
+        "network_latency_ms": 250,
+        "load_balancer_target": "primary",
+        "app_region": "primary",
+        "failover_status": "not_initiated",
+        "read_traffic": "failing",
+        "write_traffic": "failing",
+        "transaction_queue": 12000,
+        "discovered": {
+          "primary_diagnosed": false,
+          "replication_checked": false,
+          "data_divergence_assessed": false,
+          "wal_checked": false,
+          "secondary_promoted": false,
+          "traffic_switched": false,
+          "data_reconciled": false
+        },
+        "network_connectivity": "degraded",
+        "load_balancer_status": "rerouting",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "processing",
+        "service_mesh": "healthy",
+        "circuit_breakers": "closed",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
+      },
+      "playbook_text": "MULTI-REGION FAILOVER: 1) Diagnose primary failure cause. 2) Check replication status and data divergence. 3) Check WAL for uncommitted transactions. 4) Only promote secondary after confirming divergence is manageable. 5) Switch traffic AFTER promotion. Premature traffic switch causes split-brain.",
+      "available_actions": [
+        "analyze_metrics",
+        "assess_data_divergence",
+        "check_alerts",
+        "check_network_routes",
+        "check_replication_status",
+        "check_ssl_certificates",
+        "check_wal_status",
+        "clear_message_queue",
+        "correlate_logs",
+        "diagnose_primary_failure",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "force_promote_secondary",
+        "promote_secondary",
+        "reconcile_data",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "restart_primary",
+        "rotate_credentials",
+        "switch_traffic_to_secondary",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_data_consistency",
+        "verify_load_balancer"
+      ],
+      "penalties": {
+        "force_promote_secondary": -0.6,
+        "restart_primary": -0.4
+      },
+      "optimal_solution_path": [
+        "diagnose_primary_failure",
+        "check_replication_status",
+        "assess_data_divergence",
+        "check_wal_status",
+        "promote_secondary",
+        "switch_traffic_to_secondary",
+        "reconcile_data"
+      ],
+      "transition_rules": {
+        "diagnose_primary_failure": {
+          "condition": "discovered.primary_diagnosed == false",
+          "effects": {
+            "discovered.primary_diagnosed": true,
+            "primary_db_status": "hardware_failure_confirmed",
+            "primary_region_status": "failed"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "check_replication_status": {
+          "condition": "discovered.primary_diagnosed == true AND discovered.replication_checked == false",
+          "effects": {
+            "discovered.replication_checked": true,
+            "replication_lag_ms": 45000
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "assess_data_divergence": {
+          "condition": "discovered.replication_checked == true AND discovered.data_divergence_assessed == false",
+          "effects": {
+            "discovered.data_divergence_assessed": true,
+            "data_divergence": "847_transactions_behind"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.15
+        },
+        "check_wal_status": {
+          "condition": "discovered.data_divergence_assessed == true AND discovered.wal_checked == false",
+          "effects": {
+            "discovered.wal_checked": true,
+            "wal_status": "recoverable_847_txns"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "promote_secondary": {
+          "condition": "discovered.wal_checked == true AND data_divergence == '847_transactions_behind'",
+          "effects": {
+            "discovered.secondary_promoted": true,
+            "secondary_db_status": "primary_active",
+            "write_traffic": "accepting",
+            "failover_status": "promoted"
+          },
+          "else_effects": {
+            "secondary_db_status": "split_brain",
+            "data_divergence": "critical"
+          },
+          "reward": 0.3,
+          "else_reward": -0.6
+        },
+        "switch_traffic_to_secondary": {
+          "condition": "discovered.secondary_promoted == true",
+          "effects": {
+            "discovered.traffic_switched": true,
+            "load_balancer_target": "secondary",
+            "app_region": "secondary",
+            "read_traffic": "serving",
+            "transaction_queue": 500
+          },
+          "else_effects": {
+            "read_traffic": "split_brain_risk",
+            "data_divergence": "critical"
+          },
+          "reward": 0.25,
+          "else_reward": -0.5
+        },
+        "reconcile_data": {
+          "condition": "discovered.traffic_switched == true AND wal_status == 'recoverable_847_txns'",
+          "effects": {
+            "discovered.data_reconciled": true,
+            "data_divergence": "reconciled",
+            "replication_lag_ms": 0,
+            "transaction_queue": 0,
+            "write_traffic": "healthy"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_data_consistency": {
+          "condition": "discovered.data_reconciled == true",
+          "effects": {
+            "data_divergence": "verified_consistent"
+          },
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "force_promote_secondary": {
+          "condition": "1 == 1",
+          "effects": {
+            "secondary_db_status": "force_promoted",
+            "data_divergence": "unknown_risk",
+            "wal_status": "abandoned"
+          },
+          "reward": -0.6
+        },
+        "restart_primary": {
+          "condition": "1 == 1",
+          "effects": {
+            "primary_db_status": "restart_failed"
+          },
+          "reward": -0.4
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "primary_db_status == 'down'",
+          "penalty": -0.1
+        },
+        {
+          "condition": "write_traffic == 'failing'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "read_traffic == 'failing'",
+          "penalty": -0.06
+        },
+        {
+          "condition": "data_divergence == 'critical'",
+          "penalty": -0.25
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "read_traffic == 'serving'",
+          "write_traffic == 'healthy'",
+          "data_divergence == 'reconciled'"
+        ],
+        "forbidden": [
+          "data_divergence == 'critical'",
+          "secondary_db_status == 'split_brain'"
+        ]
+      },
+      "sla_violation_penalty": -1.5,
+      "domain_visibility": {
+        "app": [
+          "app_region",
+          "failover_status",
+          "read_traffic",
+          "write_traffic",
+          "transaction_queue"
+        ],
+        "infra": [
+          "primary_region_status",
+          "secondary_region_status",
+          "network_latency_ms",
+          "load_balancer_target"
+        ],
+        "database": [
+          "primary_db_status",
+          "secondary_db_status",
+          "replication_lag_ms",
+          "data_divergence",
+          "wal_status"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "switch_traffic_to_secondary",
+          "verify_data_consistency"
+        ],
+        "infra": [
+          "diagnose_primary_failure",
+          "restart_primary"
+        ],
+        "database": [
+          "check_replication_status",
+          "assess_data_divergence",
+          "check_wal_status",
+          "promote_secondary",
+          "force_promote_secondary",
+          "reconcile_data"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Primary region failure requiring emergency failover to secondary region with data consistency verification",
+      "root_cause_keywords": [
+        "region",
+        "failover",
+        "primary",
+        "secondary",
+        "disaster",
+        "recovery",
+        "dr"
+      ],
+      "conflict_pairs": [
+        [
+          "initiate_failover",
+          "attempt_primary_recovery"
+        ],
+        [
+          "promote_secondary_db",
+          "force_primary_restart"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "primary_region == offline",
+          "weight": 0.35
+        },
+        {
+          "condition": "failover_status == not_initiated",
+          "weight": 0.2
+        },
+        {
+          "condition": "data_consistency == unknown",
+          "weight": 0.2
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "user_traffic == dropping",
+            "penalty": 0.08
+          }
+        ],
+        "infra": [
+          {
+            "condition": "primary_region == offline",
+            "penalty": 0.1
+          }
+        ],
+        "database": [
+          {
+            "condition": "data_consistency == unknown",
+            "penalty": 0.06
+          }
+        ],
+        "network": [
+          {
+            "condition": "network_connectivity == degraded",
+            "penalty": 0.06
+          }
+        ],
+        "security": [],
+        "middleware": [],
+        "observability": []
+      }
+    },
+    {
+      "scenario_id": "cascade_010_db_lock_revenue_cascade",
+      "domain": "Payment Processing",
+      "description": "Database deadlock chain is escalating. Payment gateway is timing out, checkout success rate has dropped to near zero, and revenue impact is growing every second. Conflicting signals: infra metrics look normal but application layer is broken.",
+      "initial_state": {
+        "deadlock_chain_length": 14,
+        "blocked_transactions": 456,
+        "lock_wait_timeout_count": 89,
+        "temp_table_usage_pct": "92%",
+        "index_scan_ratio": "15%",
+        "payment_gateway_status": "timeout",
+        "api_timeout_rate": "67%",
+        "checkout_success_rate": "8%",
+        "revenue_per_minute": "$120",
+        "queue_depth": 8900,
+        "load_balancer_status": "healthy",
+        "ssl_termination": "normal",
+        "connection_rate": "within_limits",
+        "discovered": {
+          "deadlock_analyzed": false,
+          "blocking_txn_found": false,
+          "blocking_txn_killed": false,
+          "payment_retry_enabled": false,
+          "indexes_rebuilt": false,
+          "temp_tables_optimized": false,
+          "backup_gateway_active": false
+        },
+        "network_connectivity": "healthy",
+        "dns_latency": "normal",
+        "auth_service": "operational",
+        "ssl_certificates": "valid",
+        "firewall_rules": "active",
+        "access_controls": "enforced",
+        "api_gateway_status": "routing",
+        "message_queue": "backed_up",
+        "service_mesh": "healthy",
+        "circuit_breakers": "open",
+        "monitoring_status": "active",
+        "alert_state": "firing",
+        "log_pipeline": "flowing",
+        "metric_collection": "complete"
+      },
+      "playbook_text": "DEADLOCK CASCADE PROTOCOL: 1) Analyze the deadlock graph to find the root blocker. 2) Kill the blocking transaction. 3) Enable payment retry to recover in-flight payments. 4) Rebuild indexes only after deadlocks are cleared. 5) WARNING: infra appears healthy \u00e2\u20ac\u201d do NOT chase false signals at the infrastructure layer.",
+      "available_actions": [
+        "activate_backup_gateway",
+        "analyze_deadlock_graph",
+        "analyze_metrics",
+        "check_alerts",
+        "check_network_routes",
+        "check_ssl_certificates",
+        "check_ssl_health",
+        "clear_message_queue",
+        "correlate_logs",
+        "drain_middleware_queue",
+        "enable_firewall_rules",
+        "enable_payment_retry",
+        "enable_row_lock_escalation",
+        "fix_bgp_routes",
+        "flush_dns_cache",
+        "increase_lb_timeout",
+        "kill_blocking_transaction",
+        "optimize_temp_tables",
+        "rebuild_indexes",
+        "reset_circuit_breakers",
+        "restart_api_gateway",
+        "rotate_credentials",
+        "scale_connection_pool",
+        "throttle_checkout_rate",
+        "trace_requests",
+        "verify_auth_tokens",
+        "verify_load_balancer"
+      ],
+      "penalties": {
+        "enable_row_lock_escalation": -0.5,
+        "scale_connection_pool": -0.3
+      },
+      "optimal_solution_path": [
+        "analyze_deadlock_graph",
+        "kill_blocking_transaction",
+        "enable_payment_retry",
+        "rebuild_indexes",
+        "optimize_temp_tables",
+        "activate_backup_gateway"
+      ],
+      "transition_rules": {
+        "analyze_deadlock_graph": {
+          "condition": "discovered.deadlock_analyzed == false",
+          "effects": {
+            "discovered.deadlock_analyzed": true,
+            "discovered.blocking_txn_found": true
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "kill_blocking_transaction": {
+          "condition": "discovered.blocking_txn_found == true AND discovered.blocking_txn_killed == false",
+          "effects": {
+            "discovered.blocking_txn_killed": true,
+            "deadlock_chain_length": 0,
+            "blocked_transactions": 23,
+            "lock_wait_timeout_count": 5,
+            "api_timeout_rate": "25%",
+            "checkout_success_rate": "45%",
+            "revenue_per_minute": "$3200"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "enable_payment_retry": {
+          "condition": "discovered.blocking_txn_killed == true AND discovered.payment_retry_enabled == false",
+          "effects": {
+            "discovered.payment_retry_enabled": true,
+            "payment_gateway_status": "recovering",
+            "checkout_success_rate": "72%",
+            "revenue_per_minute": "$6100",
+            "queue_depth": 2100
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.1
+        },
+        "rebuild_indexes": {
+          "condition": "discovered.blocking_txn_killed == true AND discovered.indexes_rebuilt == false",
+          "effects": {
+            "discovered.indexes_rebuilt": true,
+            "index_scan_ratio": "85%",
+            "blocked_transactions": 2,
+            "api_timeout_rate": "5%"
+          },
+          "else_effects": {
+            "deadlock_chain_length": 20,
+            "blocked_transactions": 600
+          },
+          "reward": 0.2,
+          "else_reward": -0.4
+        },
+        "optimize_temp_tables": {
+          "condition": "discovered.indexes_rebuilt == true AND discovered.temp_tables_optimized == false",
+          "effects": {
+            "discovered.temp_tables_optimized": true,
+            "temp_table_usage_pct": "25%",
+            "checkout_success_rate": "95%",
+            "revenue_per_minute": "$8500"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "activate_backup_gateway": {
+          "condition": "discovered.payment_retry_enabled == true AND discovered.backup_gateway_active == false",
+          "effects": {
+            "discovered.backup_gateway_active": true,
+            "payment_gateway_status": "healthy_dual",
+            "checkout_success_rate": "99%",
+            "revenue_per_minute": "$9200",
+            "queue_depth": 45,
+            "api_timeout_rate": "0.5%"
+          },
+          "else_effects": {},
+          "reward": 0.25,
+          "else_reward": -0.15
+        },
+        "throttle_checkout_rate": {
+          "condition": "checkout_success_rate == '8%'",
+          "effects": {
+            "queue_depth": 4000
+          },
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "increase_lb_timeout": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": -0.05
+        },
+        "check_ssl_health": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": -0.05
+        },
+        "enable_row_lock_escalation": {
+          "condition": "1 == 1",
+          "effects": {
+            "deadlock_chain_length": 25,
+            "blocked_transactions": 800
+          },
+          "reward": -0.5
+        },
+        "scale_connection_pool": {
+          "condition": "1 == 1",
+          "effects": {
+            "connection_rate": "elevated"
+          },
+          "reward": -0.3
+        },
+        "check_network_routes": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "verify_load_balancer": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "fix_bgp_routes": {
+          "condition": "network_connectivity == partitioned",
+          "effects": {
+            "network_connectivity": "healthy",
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "flush_dns_cache": {
+          "condition": "dns_latency != normal",
+          "effects": {
+            "dns_latency": "normal"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "rotate_credentials": {
+          "condition": "auth_service == compromised",
+          "effects": {
+            "auth_service": "rotating",
+            "access_controls": "enforced"
+          },
+          "else_effects": {},
+          "reward": 0.3,
+          "else_reward": -0.2
+        },
+        "verify_auth_tokens": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "check_ssl_certificates": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "enable_firewall_rules": {
+          "condition": "firewall_rules == disabled",
+          "effects": {
+            "firewall_rules": "active"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "restart_api_gateway": {
+          "condition": "api_gateway_status == degraded",
+          "effects": {
+            "api_gateway_status": "routing"
+          },
+          "else_effects": {},
+          "reward": 0.2,
+          "else_reward": -0.1
+        },
+        "clear_message_queue": {
+          "condition": "message_queue == backed_up",
+          "effects": {
+            "message_queue": "processing"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.05
+        },
+        "reset_circuit_breakers": {
+          "condition": "circuit_breakers == open",
+          "effects": {
+            "circuit_breakers": "closed"
+          },
+          "else_effects": {},
+          "reward": 0.15,
+          "else_reward": -0.1
+        },
+        "drain_middleware_queue": {
+          "condition": "message_queue == stalled",
+          "effects": {
+            "message_queue": "draining"
+          },
+          "else_effects": {},
+          "reward": 0.1,
+          "else_reward": -0.05
+        },
+        "analyze_metrics": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "check_alerts": {
+          "condition": "1 == 1",
+          "effects": {},
+          "reward": 0.05,
+          "else_reward": 0.0
+        },
+        "trace_requests": {
+          "condition": "monitoring_status == active",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        },
+        "correlate_logs": {
+          "condition": "log_pipeline == flowing",
+          "effects": {},
+          "reward": 0.1,
+          "else_reward": 0.0
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "deadlock_chain_length > 10",
+          "penalty": -0.1
+        },
+        {
+          "condition": "payment_gateway_status == 'timeout'",
+          "penalty": -0.08
+        },
+        {
+          "condition": "checkout_success_rate == '8%'",
+          "penalty": -0.12
+        },
+        {
+          "condition": "revenue_per_minute == '$120'",
+          "penalty": -0.06
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "payment_gateway_status == 'healthy_dual'",
+          "checkout_success_rate == '99%'"
+        ],
+        "forbidden": [
+          "deadlock_chain_length > 20"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "domain_visibility": {
+        "app": [
+          "payment_gateway_status",
+          "api_timeout_rate",
+          "checkout_success_rate",
+          "revenue_per_minute",
+          "queue_depth"
+        ],
+        "infra": [
+          "load_balancer_status",
+          "ssl_termination",
+          "connection_rate"
+        ],
+        "database": [
+          "deadlock_chain_length",
+          "blocked_transactions",
+          "lock_wait_timeout_count",
+          "temp_table_usage_pct",
+          "index_scan_ratio"
+        ],
+        "network": [
+          "network_connectivity",
+          "load_balancer_status",
+          "dns_latency"
+        ],
+        "security": [
+          "auth_service",
+          "ssl_certificates",
+          "firewall_rules",
+          "access_controls"
+        ],
+        "middleware": [
+          "api_gateway_status",
+          "message_queue",
+          "service_mesh",
+          "circuit_breakers"
+        ],
+        "observability": [
+          "monitoring_status",
+          "alert_state",
+          "log_pipeline",
+          "metric_collection"
+        ]
+      },
+      "action_domains": {
+        "app": [
+          "enable_payment_retry",
+          "activate_backup_gateway",
+          "throttle_checkout_rate"
+        ],
+        "infra": [
+          "increase_lb_timeout",
+          "check_ssl_health",
+          "scale_connection_pool"
+        ],
+        "database": [
+          "analyze_deadlock_graph",
+          "kill_blocking_transaction",
+          "rebuild_indexes",
+          "optimize_temp_tables",
+          "enable_row_lock_escalation"
+        ],
+        "network": [
+          "check_network_routes",
+          "verify_load_balancer",
+          "fix_bgp_routes",
+          "flush_dns_cache"
+        ],
+        "security": [
+          "rotate_credentials",
+          "verify_auth_tokens",
+          "check_ssl_certificates",
+          "enable_firewall_rules"
+        ],
+        "middleware": [
+          "restart_api_gateway",
+          "clear_message_queue",
+          "reset_circuit_breakers",
+          "drain_middleware_queue"
+        ],
+        "observability": [
+          "analyze_metrics",
+          "check_alerts",
+          "trace_requests",
+          "correlate_logs"
+        ]
+      },
+      "root_cause": "Database lock contention from bad deployment query causing transaction failures and direct revenue loss",
+      "root_cause_keywords": [
+        "lock",
+        "contention",
+        "transaction",
+        "query",
+        "revenue",
+        "database",
+        "blocking"
+      ],
+      "conflict_pairs": [
+        [
+          "kill_blocking_queries",
+          "restart_primary_db"
+        ],
+        [
+          "scale_read_replicas",
+          "flush_connection_pool"
+        ]
+      ],
+      "severity_weights": [
+        {
+          "condition": "db_lock_status == contention",
+          "weight": 0.3
+        },
+        {
+          "condition": "transaction_status == failing",
+          "weight": 0.25
+        },
+        {
+          "condition": "revenue_impact == active",
+          "weight": 0.3
+        }
+      ],
+      "local_bleed_rules": {
+        "app": [
+          {
+            "condition": "checkout_api == failing",
+            "penalty": 0.08
+          }
+        ],
+        "infra": [],
+        "network": [],
+        "security": [],
+        "database": [
+          {
+            "condition": "db_lock_status == contention",
+            "penalty": 0.12
+          },
+          {
+            "condition": "transaction_status == failing",
+            "penalty": 0.08
+          }
+        ],
+        "middleware": [
+          {
+            "condition": "message_queue == backed_up",
+            "penalty": 0.04
+          }
+        ],
+        "observability": []
+      }
     }
   ]
 }

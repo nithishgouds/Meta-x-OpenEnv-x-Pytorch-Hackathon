@@ -1,16 +1,16 @@
 pydantic
 huggingface_hub
-openenv-core @ git+https://github.com/meta-pytorch/OpenEnv.git
+openenv-core==0.2.3
 openai
 requests
 python-dotenv
 fastapi
 uvicorn
-uv
 torch
-transformers>=5.2.0
-trl>=1.2.0
-datasets
-peft
-accelerate
-matplotlib
+transformers==4.51.3
+trl==0.17.0
+datasets==3.5.0
+peft==0.15.2
+accelerate==1.6.0
+jmespath
+matplotlib==3.9.2

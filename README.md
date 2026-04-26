@@ -10,598 +10,254 @@ tags:
   - openenv
 ---
 
-# OpsSim-AI: DevOps Incident Response Arena
+# OpsSim-AI: Distributed War Room (9-Agent Cascading Failure System)
 
-*When systems begin to fail, every second becomes a decision.*
+Real production failures rarely stay inside one component.
+
+A checkout outage might begin as a Redis failure, spread into payment timeouts, leave stale database connections behind, and tempt an agent into restarting the wrong service too early. OpsSim-AI turns that kind of messy incident into a structured multi-agent environment: agents see only their own slice of the system, communicate through a shared war-room channel, and are rewarded for diagnosing, sequencing, delegating, and recovering correctly.
+
+The goal is not just to pick the right action. The goal is to behave like a reliable incident team under uncertainty: investigate first, identify the root cause, coordinate across domains, avoid unsafe shortcuts, and restore SLA health before the cascade gets worse.
 
 ## Overview
 
-OpsSim-AI is an OpenEnv-based DevOps incident response environment designed to evaluate how AI agents behave under pressure.
-
-This project simulates realistic production failures where an agent must:
-- interpret noisy signals
-- diagnose system issues
-- follow operational constraints
-- make fast, high-stakes recovery decisions
+OpsSim-AI is an OpenEnv-compatible 9-agent environment simulating cascading production failures resolved through a distributed war room with partial observability, strict responsibility enforcement, and a mathematically rigorous reward function.
 
-Why it matters:
-- Real outages are messy
-- Logs are incomplete
-- User complaints are ambiguous
-- Wrong actions can deepen failure
+The environment targets a specific capability gap in agent evaluation: most benchmarks test whether an agent can solve a task after seeing the whole state. Real incidents are different. Each specialist sees only part of the failure, the root cause may be upstream of the visible symptom, and premature actions can make the system worse.
 
-OpsSim-AI brings that reality into a structured environment where agents are tested not on toy games, but on the kind of decisions that keep production systems alive.
+OpsSim-AI makes those pressures explicit:
 
-## Problem Statement
+- **Partial observability:** each execution agent sees only its domain-specific state.
+- **Coordination pressure:** the Incident Commander must synthesize reports and delegate.
+- **Responsibility boundaries:** agents are penalized for acting outside their domain.
+- **Long-horizon recovery:** many scenarios require investigation, preconditions, and ordered remediation.
+- **Safety oversight:** the Supervisor can veto harmful directives before execution.
 
-Modern incident response is not just about detecting failures. It is about choosing the right action before the system deteriorates further.
+## Architecture: 9 Agents
 
-Current benchmarking setups often fall short because they:
-- simplify failures into static tasks
-- ignore business constraints like SLA protection
-- underrepresent uncertainty and operational trade-offs
-- fail to model the cost of hesitation
+### Execution Layer (7 agents)
 
-In real DevOps environments:
-- doing nothing is often an action with consequences
-- saving one service may endanger another
-- recovery is rarely a single-step fix
-- delays translate into user pain, revenue loss, and cascading instability
+| Agent | Domain | Responsibility |
+|-------|--------|---------------|
+| **AppOps** | app | Application metrics, checkout, payment, latency |
+| **InfraOps** | infra | Infrastructure, caching, pod health, compute |
+| **DatabaseOps** | database | DB pools, replication, queries, locks |
+| **NetworkOps** | network | Connectivity, load balancers, DNS, BGP routes |
+| **SecOps** | security | Auth, certificates, firewall, access controls |
+| **MiddlewareOps** | middleware | API gateway, message queues, service mesh, circuit breakers |
+| **ObservabilityOps** | observability | Monitoring, alerts, log pipelines, metrics collection |
 
-We built OpsSim-AI to capture that urgency.
+### Coordination Layer
 
-## Solution
+| Agent | Role |
+|-------|------|
+| **Incident Commander (IC)** | Reads all reports, issues directives, plans multi-step resolution |
 
-OpsSim-AI solves this by combining:
-- a structured OpenEnv environment
-- typed observations, actions, and rewards
-- scenario-driven incident simulations
-- an LLM-based decision layer for action selection
+### Oversight Layer
 
-The system presents the agent with evolving production states across three difficulty levels:
-- `easy`: direct configuration recovery
-- `medium`: hidden bug diagnosis from indirect signals
-- `hard`: SLA-aware incident mitigation under pressure
+| Agent | Role |
+|-------|------|
+| **Supervisor (Fleet AI)** | Evaluates IC directives, vetoes catastrophic actions |
 
-Using OpenEnv, each task follows a consistent interaction loop:
-- reset environment
-- observe state
-- choose action
-- receive reward feedback
-- continue until resolved or terminated
+## Environment Mental Model
 
-The AI agent does not simply classify a state. It must reason through consequences, adapt across steps, and recover systems while minimizing operational damage.
+Think of OpsSim-AI as a simulated production war room.
 
-## System Architecture
+At the start of each episode, the system is already degraded. The failure may appear in one place, but the cause can live somewhere else: a cache outage causing payment failures, a bad canary deployment creating latency spikes, a database deadlock collapsing checkout, or a regional failover problem creating downstream symptoms.
 
-### `env.py`
-The simulation engine.
+The agent team must recover the system by repeatedly answering three questions:
 
-Responsibilities:
-- loads task scenarios
-- maintains environment state
-- applies transitions
-- computes rewards
-- enforces penalties, guardrails, and SLA outcomes
+1. **What do we know?**
+   Each execution agent receives a filtered observation. AppOps may see checkout and payment state; DatabaseOps may see pool or lock state; NetworkOps may see DNS and routing state. No single execution agent starts with the full picture.
 
-This is the operational heart of the system.
+2. **What should happen next?**
+   Agents communicate observations into the incident channel. The Incident Commander reads the shared channel, tracks progress toward SLA goals, and chooses a target agent plus action.
 
-### `inference.py`
-The LLM decision layer and evaluator.
+3. **Is the action safe and correctly owned?**
+   The Supervisor evaluates the directive. The environment then checks whether the target agent is responsible for that action, whether prerequisites are met, and whether the action improves or damages the system.
 
-Responsibilities:
-- reads environment observations
-- prompts the model for next actions
-- executes environment steps
-- prints standardized evaluation traces
-- computes normalized task scores
+### What the Agent Sees
 
-This is where the AI agent turns observation into action.
+The observation includes:
 
-### `models.py`
-The typed contract.
+- available actions
+- current visible system state
+- playbook text
+- logs / incident description
+- incident-channel messages
+- SLA goal state
+- progress toward recovery
+- domain-filtered views for specialist agents
 
-Responsibilities:
-- defines `Observation`
-- defines `Action`
-- defines `Reward`
+This creates a useful tension: the IC needs a global plan, but the evidence arrives through narrow domain windows.
 
-Using Pydantic ensures clean structure, consistent interfaces, and OpenEnv-aligned interaction semantics.
+### What the Agent Can Do
 
-## Repository Structure
+Agents can:
 
-- `env.py` -> core simulation environment and reward engine
-- `inference.py` -> LLM decision layer, evaluation loop, and baseline scoring
-- `models.py` -> typed Pydantic schemas for observations, actions, and rewards
-- `tasks/` -> scenario datasets for easy, medium, and hard incidents
-- `server/` -> FastAPI service layer used for deployment and API interaction
-- `openenv.yaml` -> OpenEnv metadata and task registration
-- `Dockerfile` -> container build definition for local and Hugging Face deployment
+- investigate symptoms and dependencies
+- report findings through the incident channel
+- execute domain-specific remediation actions
+- follow playbook guidance
+- recover state through transition rules
+- make mistakes such as acting too early, repeating actions, choosing unsafe actions, or assigning work to the wrong domain
 
-## Reward Function Design
+Many scenarios include tempting but harmful shortcuts. For example, blindly restarting a service may carry a penalty if the actual root cause has not been fixed.
 
-The reward design is built to feel operationally real, not artificially convenient.
+## Execution Flow (Strict 8-Phase)
 
-### Core Philosophy
+```
+1. ObservabilityOps analyzes metrics and surfaces root cause
+2. Execution agents observe their domain and report to incident channel
+3. IC reads all reports from incident channel
+4. IC issues directive (target_agent + action)
+5. Supervisor evaluates directive — approves or vetoes
+6. Target agent executes action
+7. Environment updates state
+8. Reward is computed (13 components)
+```
 
-In real incident response:
-- delay is expensive
-- useless actions are expensive
-- risky actions can be catastrophic
-- partial improvement matters
-- violating SLA rules can end the episode immediately
+## Reward Function (13 Components)
 
-This reward system captures that tension.
+The total reward at step t follows the formal equation:
 
-### Dynamic SLA Bleed
+$$R_t = \Delta H(s_t, s_{t-1}) - \left(B_{sys}(s_t) + \sum_{d \in D} B_{loc}(s_t, d)\right) - \lambda \cdot t$$
+$$+ Q_{act}(a_t) + R_{seq}(a_t, h_t) - P_{resp}(a_t, e) - P_{conf}(a_t, a_{t-1})$$
+$$+ R_{coord}(IC_t, a_t) + R_{obs}(m_{obs}, s_t) + R_{sup}(IC_t) - \gamma \cdot \Sigma(m_t)$$
+$$+ \mathbb{1}_{SLA\_Met} \cdot R_{succ}$$
 
-The environment applies **dynamic bleed**, which represents ongoing system damage while the incident remains unresolved.
+The reward is designed to score incident behavior, not just endpoint success. It rewards health improvements, valid actions, correct sequencing, good delegation, useful observability, and supervisor judgment. It penalizes ongoing degradation, wasted time, wrong-domain actions, conflicts, repeated or idle behavior, and excessive communication.
 
-Intuition:
-- if the system is degraded, the system keeps bleeding
-- the longer critical conditions persist, the more costly each step becomes
-- stability must be restored, not merely observed
+### Pillar I: System Health & Degradation
 
-This makes the environment feel alive. The system does not wait politely while the agent thinks.
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Global System Health | ΔH | Positive delta when SLA metrics improve |
+| Dynamic Global Bleed | B_sys | Sum of active incident severity weights (not hardcoded) |
+| Local Domain Bleed | B_loc | Per-domain degradation penalties |
+| Urgency Penalty | P_urg | Linear time-decay: λ·t where λ = 1/max_steps |
 
-### Why Doing Nothing Is Costly
+### Pillar II: Action & Sequencing Execution
 
-`do_nothing` is explicitly penalized.
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Action Quality | Q_act | Rewards valid actions, penalizes invalid/redundant/do_nothing |
+| Sequencing Reward | R_seq | Rewards topologically correct execution order |
+| Responsibility Penalty | P_resp | Massive penalty (-5.0) if agent acts outside its domain |
+| Conflict Penalty | P_conf | Penalizes mutually exclusive or repeated consecutive actions |
 
-Why:
-- in real outages, inaction is often a decision
-- waiting while systems degrade can be as dangerous as a bad intervention
-- incident response rewards decisive, informed action
+### Pillar III: Coordination & Communication
 
-This encourages the agent to engage with the problem rather than stall.
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Coordination Reward | R_coord | IC correctly delegates to right domain agent |
+| Observability Contribution | R_obs | ObservabilityOps surfaces correct root cause keywords |
+| Supervisor Effect | R_sup | Correct veto of harmful actions / penalty for rubber-stamping |
+| Communication Cost | P_comm | γ·Σ(messages) prevents LLM chatter loops |
 
-### Trade-Offs Matter
+### Pillar IV: Terminal
 
-The hardest task is built around operational trade-offs.
+| Component | Symbol | Description |
+|-----------|--------|-------------|
+| Success Reward | R_succ | +2.0 when all SLA conditions met |
 
-Sometimes the agent must choose between:
-- protecting critical services
-- reducing overall system pressure
-- avoiding harmful interventions
-- respecting SLA and playbook guardrails
+## do_nothing Prevention
 
-That means the reward is not about blindly maximizing one metric. It is about making the least dangerous decision in a failing system.
+1. **Action Filtering**: do_nothing removed from available actions when valid actions exist
+2. **Escalating Penalty**: -0.3 × (consecutive_count)^1.5
+3. **Stagnation Detection**: Extra penalty when no health improvement for 3+ steps
 
-### Reward Components
+## Long-Horizon Planning
 
-The hard environment combines several signals:
+- **Goal Decomposition**: IC receives unmet SLA goals and must plan multi-step resolution
+- **Progress Tracking**: Real-time % of SLA conditions met, injected into all prompts
+- **Dependency Awareness**: Action domains + sequencing reward enforce causal ordering
+- **Persistent Memory**: Full action history with outcomes tracked across episode
+- **Recovery**: Supervisor can veto and suggest alternatives when stuck
 
-- **Dynamic bleed**
-  State-based penalties that reflect ongoing system degradation
+## Why It Matters
 
-- **Action penalties**
-  Punish invalid, repeated, destructive, or wasteful actions
+OpsSim-AI is useful for researchers and builders who care about agent reliability in operational settings.
 
-- **Urgency penalty**
-  Adds pressure over time so late recovery is less valuable than fast recovery
+Real-world incident response is not a single-tool benchmark. It requires diagnosis under partial information, coordination between specialists, safe sequencing, and discipline around ownership. A strong model should know when to investigate, when to act, when to escalate, and when not to touch something.
 
-- **Progress rewards**
-  Rewards meaningful improvements, including partial stabilization and SLA improvement
+This environment is interesting because it combines:
 
-- **SLA guardrails**
-  Severe failures or forbidden actions can terminate the episode with strong penalties
+- **multi-agent coordination** with explicit roles
+- **partial observability** across operational domains
+- **stateful cascading failures** with transition rules
+- **reward shaping** for investigation, delegation, sequencing, and safety
+- **OpenEnv compatibility** for evaluation and training loops
 
-### Why This Design Is Powerful
+That makes it a compact testbed for studying whether LLM agents can move from "answering correctly" toward operating responsibly in a simulated production system.
 
-This design is realistic because it mirrors how production incidents actually unfold:
-- damage accumulates
-- time matters
-- careless actions hurt
-- partial recovery has value
-- business constraints shape technical decisions
+## Why This Project Fits the Hackathon Themes
 
-The result is a reward function that does more than score correctness. It evaluates operational judgment.
+### Theme #1 – Multi-Agent Interactions
 
-## Task Utility
+- Seven specialist agents observe different parts of the system, so no single agent has the full answer.
+- The Incident Commander coordinates through a shared war-room channel, then delegates actions to the right domain owner.
+- The Supervisor adds an oversight layer by checking whether directives are safe before execution.
 
-### Easy Task: Useful for Direct Configuration Failures
+### Theme #2 – Long-Horizon Planning
 
-The `easy` task is useful in situations where the incident is real, important, but still relatively localized. These are the kinds of failures where the system is broken because one configuration choice is wrong, one service dependency is pointed to the wrong target, or one operational fix resolves the issue quickly.
+- Incidents require ordered recovery: investigate symptoms, identify root cause, satisfy preconditions, then remediate.
+- Rewards are delayed because early diagnostic steps may only pay off after later fixes restore SLA health.
+- The environment tracks history, progress, failed actions, and stagnation so agents must recover from mistakes.
 
-This task is valuable for benchmarking:
-- first-response automation
-- alert triage assistants
-- junior-operator copilots
-- simple remediation workflows
+### Theme #3 – World Modeling (Professional Tasks)
 
-It reflects common production moments such as:
-- a bad cache configuration
-- a misrouted internal dependency
-- a service restart or config reload that resolves the outage
+- The environment simulates realistic production systems with application, infrastructure, database, network, security, middleware, and observability state.
+- Agents operate under partial observability, matching how real incident teams only see the signals available to their role.
+- Success depends on causal reasoning: agents must connect upstream failures to downstream symptoms instead of chasing surface alerts.
 
-Why this matters:
-- many real incidents are not complex distributed disasters
-- teams still lose time on simple failures because logs are noisy or user reports are misleading
-- a good AI system should solve easy incidents fast, confidently, and without unnecessary actions
+### Theme #4 – Self-Improvement
 
-So the `easy` task measures whether the agent can identify a direct root cause and act precisely under light operational pressure.
+- The reward function breaks behavior into interpretable feedback signals such as sequencing, delegation, safety, and communication cost.
+- `generate_sft_dataset.py` and `train.py` support improvement loops by turning scenarios and reward-guided behavior into data for supervised or RL-style training.
+- Evaluation traces can show where an agent stalls, repeats bad actions, or delegates incorrectly, making failures easier to learn from.
 
-### Medium Task: Useful for Multi-Step Diagnosis Under Uncertainty
+## Project Structure
 
-The `medium` task is useful in situations where the failure is not obvious from a single log line or a single user complaint. This is the kind of incident where the visible symptom is only part of the story, and the operator must investigate, test, and infer hidden causes over several steps.
+```
+├── env.py              # DevOpsEnv — 13-component reward, 7 domains, OpenEnv-compatible
+├── models.py           # Pydantic models (Action, Observation, Reward with 13 fields, State)
+├── multi_agent.py      # WarRoom + 9 agents (7 execution + IC + Supervisor)
+├── inference.py        # LLM loop: 8-phase execution with Supervisor veto
+├── train.py            # GRPO training with TRL (tool-calling, LoRA)
+├── generate_sft_dataset.py # SFT dataset generation from cascade scenarios
+├── server/app.py       # FastAPI server for HF Space
+├── tasks/cascade.json  # 10 scenarios × 7 domains
+├── eval_results/       # Evaluation artifacts
+├── openenv.yaml        # OpenEnv manifest
+├── Dockerfile          # Container
+└── requirements.txt    # Dependencies
+```
 
-This task is valuable for benchmarking:
-- debugging copilots
-- incident investigation assistants
-- support escalation automation
-- internal reliability tools that recommend next-best actions
+## Usage
 
-It reflects real situations such as:
-- weekend-only or edge-case failures
-- date parsing or serialization bugs
-- incidents where metrics look acceptable but users are still impacted
-- failures that only become understandable after structured exploration
-
-Why this matters:
-- many operational failures are not solved by one-shot answers
-- engineers often need to narrow possibilities carefully before acting
-- repeating the wrong investigation steps wastes time and increases confusion
-
-So the `medium` task measures whether the agent can reason across multiple steps, learn from previous action outcomes, and convert incomplete evidence into a correct diagnosis.
-
-### Hard Task: Useful for High-Stakes SLA and Multi-Service Incidents
-
-The `hard` task is useful in situations where the system is already in serious distress and every action has consequences beyond the immediate component being touched. These are the incidents where services interact, customer impact is active, and the operator must think in terms of business guardrails, cascading failures, and recovery trade-offs.
-
-This task is valuable for benchmarking:
-- advanced incident commanders
-- AI reliability agents for mission-critical systems
-- automated mitigation planners
-- decision support systems for multi-service outages
-
-It reflects production scenarios such as:
-- payment or checkout instability
-- overloaded downstream dependencies
-- partial shutdown decisions to protect critical flows
-- recovery plans constrained by SLA or forbidden actions
-
-Why this matters:
-- the hardest operational decisions are rarely about a single machine
-- protecting revenue-critical paths may require sacrificing noncritical services
-- doing nothing can be expensive, but acting carelessly can be worse
-
-So the `hard` task measures whether the agent can make disciplined decisions in the presence of urgency, system bleed, and operational guardrails.
-
-### Easy Task Reward Design
-
-The `easy` task is intentionally simple in structure, but not trivial in behavior. Its reward design is built around the idea of **fast and correct configuration recovery**.
-
-At this level, the environment rewards the agent for identifying the single action that truly resolves the issue. The goal is not to blindly explore every option. The goal is to read the user message, connect it to the logs, and act with precision.
-
-The reward behaves like a lightweight operational signal:
-- every step carries a small cost, because even simple incidents become more expensive when they drag on
-- invalid actions are penalized, because random guessing is not real diagnosis
-- the correct action receives a strong positive reward and ends the episode
-- misleading but plausible actions can still produce useful learning signal through red-herring handling
-- repeating a known bad path becomes more costly than the first mistake
-
-In plain terms, the `easy` reward function teaches the agent one important habit: **do not confuse motion with progress**.
-
-Why this matters:
-- many real incidents begin with something that looks obvious
-- engineers often lose time following the wrong symptom
-- the best response is not more action, but the right action
-
-So even though the task is easier, the reward design still captures a realistic principle: speed matters, but precision matters more.
-
-### Medium Task Reward Design
-
-The `medium` task introduces a more subtle reality: systems may appear healthy while users are still failing.
-
-Here, the reward function is designed around **structured diagnosis under uncertainty**.
-
-The agent is no longer solving a single visible configuration problem. Instead, it must infer a hidden bug from indirect evidence such as user complaints, shifting hints, and the effect of earlier actions. That means the reward design must encourage disciplined reasoning across multiple steps.
-
-The medium reward function does this by combining:
-- a step-based cost that discourages wandering
-- penalties for invalid actions, because careless action selection still has operational cost
-- repeat penalties, because looping on the same action is one of the most common forms of failed diagnosis
-- action-specific rewards from transition rules, so meaningful investigative behavior is recognized
-- completion reward through the successful satisfaction of the scenario's success condition
-
-What makes this powerful is that the reward does not only celebrate the final fix. It also recognizes **useful diagnostic behavior** along the way.
-
-That reflects real-world engineering:
-- good incident response is often a sequence of narrowing possibilities
-- useful analysis steps may not solve the outage immediately, but they reduce uncertainty
-- repeating the same ineffective move is operationally expensive and psychologically realistic
-
-The `medium` task reward design therefore teaches the agent to behave like a thoughtful operator:
-- investigate
-- infer
-- adapt
-- then fix
-
-### Hard Task Reward Design
-
-The `hard` task is where the reward function becomes fully operational in spirit.
-
-This task is designed around **incident management under pressure**, where every action has consequences and some choices may stabilize one part of the system while harming another. The reward function is not merely scoring correctness. It is measuring whether the agent behaves like a responsible incident commander.
-
-At this level, reward emerges from several interacting forces.
-
-#### Dynamic Bleed
-
-Dynamic bleed represents the cost of leaving the system in a degraded state.
-
-This is one of the most important ideas in the environment:
-- the incident is not frozen in time
-- unresolved failures continue to hurt
-- every step taken in a bad state increases operational damage
-
-This mirrors real outages, where degraded routing, overloaded services, or broken dependencies continue causing user pain until they are actively addressed.
-
-#### Action Penalties
-
-The environment penalizes actions that are:
-- invalid
-- repeated
-- explicitly harmful
-- strategically lazy, such as doing nothing during a live incident
-
-This matters because in real operations, bad actions are not neutral. They consume time, burn trust, and can deepen instability.
-
-The agent is therefore pushed toward responsible action selection, not brute-force experimentation.
-
-#### Urgency Penalty
-
-The urgency penalty increases over time.
-
-This creates a very important pressure gradient:
-- a correct action taken early is more valuable than the same action taken late
-- hesitation has a measurable cost
-- recovery is judged not just by outcome, but by how long the system suffered before that outcome arrived
-
-This is one of the key reasons the hard task feels realistic. It captures the fact that incident response is always racing against worsening consequences.
-
-#### Progress Rewards
-
-Not every good action fully resolves the system, and the reward design acknowledges that.
-
-The environment grants progress rewards for meaningful improvement such as:
-- reducing critical failure severity
-- moving the system from worse states toward healthier ones
-- improving SLA-related conditions before full completion
-
-This is important because real recovery is rarely instantaneous. Strong agents should be rewarded for moving the system in the right direction even before the final recovery state is reached.
-
-That gives the task a more realistic shape:
-- partial recovery matters
-- meaningful stabilization matters
-- intermediate decisions matter
-
-#### SLA Guardrails
-
-The hard task also includes guardrails and forbidden outcomes.
-
-Some actions may immediately create unacceptable system states or violate the scenario's operational constraints. In those cases, the environment can terminate early with a strong negative outcome.
-
-This models a very real production truth:
-- not every technically possible action is operationally acceptable
-- some decisions may reduce pressure but still violate business-critical guarantees
-- systems are not only protected by engineering goals, but also by service obligations
-
-The reward therefore reflects both technical and organizational reality.
-
-### Why the Three Designs Work Together
-
-Taken together, the reward functions create a progression in operational intelligence:
-
-- `easy` teaches accurate single-step correction
-- `medium` teaches diagnostic sequencing and hidden-state reasoning
-- `hard` teaches strategic recovery under pressure, cost, and policy constraints
-
-This tiered reward design is powerful because each task adds a new layer of realism without abandoning clarity.
-
-The agent first learns:
-- how to avoid obvious mistakes
-
-Then it learns:
-- how to reason through incomplete evidence
-
-Finally, it learns:
-- how to act when the system is actively deteriorating and every decision carries trade-offs
-
-That progression is what makes the environment more than a benchmark. It makes it a meaningful test of operational reasoning.
-
-## Features
-
-- Deterministic execution for scenario sequencing and grading
-- SLA-aware decision environments
-- Multi-step reasoning across escalating incident complexity
-- Real-world DevOps and outage-inspired scenarios
-- Typed Pydantic observation, action, and reward models
-- OpenEnv-compatible task structure
-- Standardized evaluation traces for reproducibility
-- Scalable dataset design using scenario JSON files
-- Reward shaping that reflects operational urgency and trade-offs
-
-## Installation & Setup
-
-### 1. Clone the Repository
+### Inference
 
 ```bash
-git clone https://github.com/nithishgouds/OpsSim-AI
-cd OpsSim-AI
-```
-
-### 2. Create a Virtual Environment
-
-```bash
-python -m venv .venv
-```
-
-Activate it:
-
-#### Linux / macOS
-```bash
-source .venv/bin/activate
-```
-
-#### Windows PowerShell
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Set Up `.env`
-
-Create a `.env` file in the project root and add:
-
-```env
-HF_TOKEN=<your_token_here>
-API_BASE_URL=https://router.huggingface.co/v1
-MODEL_NAME=meta-llama/Meta-Llama-3-8B-Instruct
-```
-
-### 5. Run the Project
-
-```bash
+export HF_TOKEN=your_token
 python inference.py
 ```
 
-Running `inference.py` executes the predefined evaluation scenarios, calls the LLM for each step, and prints step-by-step decision traces followed by final task scores.
-
-### 6. Docker Installation and Setup
-
-Install Docker before building the project container:
-
-- Windows: install Docker Desktop and make sure the Docker engine is running
-- Linux: install Docker Engine and verify that the `docker` command works
-- WSL: enable Docker Desktop WSL integration if you are running the project from Ubuntu or another WSL distro
-
-Build the Docker image:
+### Training
 
 ```bash
-docker build -t opssim-ai .
+python train.py --model Qwen/Qwen3-0.6B --output_dir ./opssim-grpo-output
 ```
 
-Run the Docker container:
+### Server
 
 ```bash
-docker run -p 7860:7860 opssim-ai
+python server/app.py
 ```
 
-Optional health check:
+## Authors
 
-```bash
-curl http://localhost:7860/health
-```
+- Sandeep
+- Venkatesh
+- Nithish
 
-## How to Run Demo
 
-1. Run:
-
-```bash
-python inference.py
-```
-
-2. The system will:
-- load predefined scenarios
-- simulate agent decisions across easy, medium, and hard tasks
-- print step-by-step logs for each action taken
-- output final task scores at the end of each episode
-
-3. A successful run will end with lines shaped like:
-
-```text
-[END] success=true steps=... score=... rewards=...
-```
-
-Success means the environment executed correctly and the agent completed the episode with a valid normalized task score.
-
-## Example Output
-
-```text
-[START] task=hard_scenario_1 env=opssim_ai model=meta-llama/Meta-Llama-3-8B-Instruct
-[STEP] step=1 action=restart(database) reward=-0.25 done=false error=null
-[STEP] step=2 action=reroute_traffic reward=0.30 done=false error=null
-[STEP] step=3 action=scale_backend reward=1.10 done=true error=null
-[END] success=true steps=3 rewards=-0.25,0.30,1.10
-```
-## Baseline Score
-
-```text
-[START] task=easy_scenario_1 env=opssim_ai model=meta-llama/Meta-Llama-3-8B-Instruct
-[STEP] step=1 action=reboot_cache_cluster reward=0.95 done=true error=null
-[END] success=true steps=1 score=0.9634 rewards=0.95
-[START] task=medium_scenario_1 env=opssim_ai model=meta-llama/Meta-Llama-3-8B-Instruct
-[STEP] step=1 action=analyze_failure_timestamps reward=0.27 done=false error=null
-[STEP] step=2 action=isolate_date_parsing_logic reward=0.24 done=false error=null
-[STEP] step=3 action=deploy_weekend_date_patch reward=0.91 done=true error=null
-[END] success=true steps=3 score=0.6014 rewards=0.27,0.24,0.91
-[START] task=hard_scenario_1 env=opssim_ai model=meta-llama/Meta-Llama-3-8B-Instruct
-[STEP] step=1 action=do_nothing reward=-1.05 done=false error=null
-[STEP] step=2 action=restart(checkout_cart) reward=-0.80 done=false error=null
-[STEP] step=3 action=shutdown(user_analytics) reward=-0.35 done=false error=null
-[STEP] step=4 action=restart(payment_gateway) reward=-1.40 done=false error=null
-[STEP] step=5 action=shutdown(recommendation_engine) reward=-0.40 done=false error=null
-[STEP] step=6 action=restart(checkout_cart) reward=0.75 done=true error=null
-[END] success=true steps=6 score=0.4583 rewards=-1.05,-0.80,-0.35,-1.40,-0.40,0.75
-```
-
-## OpenEnv Interface Mapping
-
-This environment follows the OpenEnv interaction model directly:
-
-- `reset()` -> initializes a scenario and returns the first typed observation
-- `step(action)` -> applies one action and returns `(observation, reward, done, info)`
-- `state()` -> returns the current environment state
-- `Observation`, `Action`, and `Reward` are defined as typed Pydantic models in `models.py`
-- `openenv.yaml` declares the environment metadata and registered tasks
-
-Episode flow:
-- initialize with `reset()`
-- inspect the observation
-- choose an action
-- receive typed reward feedback
-- continue until the task terminates
-
-## Deployment
-
-Live demo: https://nithishgouds-opssim-ai.hf.space
-
-## Hackathon Compliance
-
-This project is designed to align with the hackathon requirements:
-
-- OpenEnv-style environment interface
-- Typed `Observation`, `Action`, and `Reward` models using Pydantic
-- Three structured tasks: `easy -> medium -> hard`
-- Programmatic scoring normalized to the `0.0 - 1.0` range
-- Deterministic environment behavior for task sequencing and grading
-- OpenAI client used for all LLM calls
-- Standardized inference output format for evaluation
-
-## Notes & Constraints
-
-- Requires a valid Hugging Face token for LLM-backed inference
-- Runtime behavior depends on an external hosted model endpoint
-- LLM outputs are made more stable through deterministic settings, but small variations may still occur across providers
-- The environment is designed for realistic simulation and benchmarking, not direct production execution against live infrastructure
-
-## Future Improvements
-
-- Add richer multi-service dependency graphs for more complex outage propagation
-- Expand incident datasets with domain-specific failure modes
-- Introduce postmortem generation for explainable recovery analysis
-- Add human-vs-agent benchmarking for operational comparison
-
-## Conclusion
-
-OpsSim-AI is built around a simple belief: reliability is tested when systems are already under stress.
-
-This project does not ask an agent to solve a puzzle. It asks the agent to respond when infrastructure is degrading, signals are noisy, and hesitation has a cost.
-
-That is where dependable AI begins to matter.

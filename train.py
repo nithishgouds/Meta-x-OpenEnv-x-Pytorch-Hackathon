@@ -1,24 +1,3 @@
-"""
-OpsSim-AI GRPO Training Script
-===============================
-Trains a language model to be a DevOps incident-response agent using
-Group Relative Policy Optimization (GRPO) with TRL's environment_factory.
-
-The agent interacts with DevOpsEnv via tool-calling: it reads the incident
-description, chooses actions from the available set, and receives rewards
-based on how well it resolves the incident.
-
-Usage:
-    # Single GPU (default, small model)
-    python train.py
-
-    # Multi-GPU with accelerate
-    accelerate launch train.py
-
-    # Override defaults
-    python train.py --model Qwen/Qwen3-1.7B --task easy --num_train_epochs 3
-"""
-
 import argparse
 import json
 import os
@@ -27,201 +6,156 @@ import sys
 from datasets import Dataset
 from trl import GRPOConfig, GRPOTrainer
 
-# ---------------------------------------------------------------------------
-# Environment wrapper for TRL environment_factory
-# ---------------------------------------------------------------------------
 
-class OpsSIMTrainingEnv:
-    """
-    TRL-compatible environment wrapper around DevOpsEnv.
-
-    TRL's environment_factory expects a class with:
-      - reset(**kwargs) -> str | None
-      - public methods (exposed as tools) with typed args and Google-style docstrings
-    
-    The reward is accumulated in self.reward and read by the reward function.
-    """
-
+class MultiAgentTrainingEnv:
     def __init__(self):
-        # Lazy import so the module path is resolved at instantiation time
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from env import DevOpsEnv
-        self.env = DevOpsEnv(seed=None, max_steps=8)
+        from env import DevOpsEnv, EXECUTION_AGENTS, AGENT_DOMAIN_MAP, IC_NAME, SUPERVISOR_NAME
+        from multi_agent import WarRoom
+
+        self.room = WarRoom(seed=42, max_steps=15)
         self.reward = 0.0
         self.done = False
-        self.task_type = "easy"
         self._available_actions = []
+        self._agent_names = EXECUTION_AGENTS
+        self._agent_domain_map = AGENT_DOMAIN_MAP
+        self._domain_observations = {}
+        self._playbook_text = ""
+        self._action_domains = {}
+        self._root_cause_keywords = []
+        self._penalties = {}
 
-    def reset(self, prompt=None, **kwargs) -> str:
-        """Reset the environment and return the initial incident description."""
-        # Extract task type from the prompt metadata if provided
-        task = "easy"
-        if prompt and isinstance(prompt, list):
-            # Conversational format: check the user message for task hints
-            for msg in prompt:
-                content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                if "[CASCADE]" in content:
-                    task = "cascade"
-                elif "[MEDIUM]" in content:
-                    task = "medium"
-                elif "[HARD]" in content:
-                    task = "hard"
-
-        self.task_type = task
+    def reset(self, prompt=None, **kwargs):
+        obs, domain_obs = self.room.reset()
         self.reward = 0.0
         self.done = False
-
-        obs = self.env.reset(task=task)
         self._available_actions = obs.available_actions or []
+        self._domain_observations = domain_obs
+        self._playbook_text = obs.playbook_text or ""
+        self._action_domains = self.room.env.state_data.get("action_domains", {})
+        self._root_cause_keywords = self.room.env.state_data.get("root_cause_keywords", [])
+        self._penalties = self.room.env.state_data.get("penalties", {})
 
-        # Build a textual observation for the LLM
-        parts = []
-        if obs.user_message:
-            parts.append(f"Incident Report: {obs.user_message}")
-        if obs.user_messages:
-            parts.append("User Reports:\n" + "\n".join(f"  - {m}" for m in obs.user_messages))
-        if obs.logs:
-            parts.append(f"System Logs:\n{obs.logs}")
-        if obs.config:
-            parts.append(f"Current Config: {json.dumps(obs.config)}")
-        if obs.system_metrics:
-            parts.append(f"System Metrics: {json.dumps(obs.system_metrics)}")
-        if obs.system_state:
-            parts.append(f"System State: {json.dumps(obs.system_state, default=str)}")
-        if obs.playbook_text:
-            parts.append(f"Playbook:\n{obs.playbook_text}")
-        if obs.alerts:
-            parts.append("Alerts:\n" + "\n".join(f"  - {a}" for a in obs.alerts))
+        goal_state = self.room.get_goal_state()
+        unmet = [g for g, met in goal_state.items() if not met]
 
-        parts.append(f"\nAvailable Actions: {', '.join(self._available_actions)}")
-        parts.append(
-            "\nYour task: Analyze the incident and take the best action to resolve it. "
-            "Use the take_action tool to execute an action."
-        )
+        parts = [
+            f"INCIDENT: {obs.logs or 'Unknown incident'}",
+            f"\nPlaybook:\n{self._playbook_text}",
+            f"\nSystem State:\n{json.dumps(obs.system_state, indent=2, default=str)}",
+            f"\nAvailable Actions: {', '.join(self._available_actions)}",
+            f"\nUnmet SLA Goals:\n" + "\n".join(f"  - {g}" for g in unmet),
+            f"\nRoot Cause Keywords: {', '.join(self._root_cause_keywords)}",
+            "\nYou are the Incident Commander in a war room with 7 domain agents:",
+            "  AppOps, InfraOps, DatabaseOps, NetworkOps, SecOps, MiddlewareOps, ObservabilityOps",
+            "Plus a Supervisor (Fleet AI) who approves or vetoes your directives.",
+            "\nTools available:",
+            "  observe_domain(agent_name) - Check a domain agent's view",
+            "  communicate(agent_name, message) - Post to incident channel",
+            "  execute_directive(target_agent, action) - Issue action to a domain agent",
+            "\nFollow the playbook. Investigate before acting. Fix root causes before symptoms.",
+        ]
+        return "\n".join(parts)
 
-        return "\n\n".join(parts)
-
-    def take_action(self, action_type: str) -> str:
-        """
-        Execute a DevOps action in the environment.
-
-        Args:
-            action_type: The action to execute. Must be one of the available actions.
-
-        Returns:
-            A string describing the result of the action and updated system state.
-        """
+    def observe_domain(self, agent_name: str) -> str:
+        """Get the domain-specific observation for a specialist agent."""
         if self.done:
-            return "The incident has already been resolved or the episode has ended."
+            return "Incident resolved or episode ended."
+        if agent_name not in self._agent_names:
+            return f"Unknown agent: {agent_name}. Use one of: {', '.join(self._agent_names)}"
+        domain_obs = self._domain_observations.get(agent_name)
+        if domain_obs is None:
+            domain_obs = self.room.env.get_domain_observation(agent_name)
+        parts = [f"[{agent_name} Domain View]"]
+        if domain_obs.domain_state:
+            parts.append(f"State: {json.dumps(domain_obs.domain_state, indent=2, default=str)}")
+        else:
+            parts.append("State: No domain-specific data visible.")
+        parts.append(f"Actions: {json.dumps(domain_obs.available_actions)}")
+        if domain_obs.goal_state:
+            parts.append(f"Goal Progress: {domain_obs.progress:.0%}")
+        return "\n".join(parts)
 
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from models import Action
+    def communicate(self, agent_name: str, message: str) -> str:
+        """Post a message to the shared incident channel as a domain agent."""
+        if self.done:
+            return "Incident resolved or episode ended."
+        self.room.observe_and_communicate(agent_name, message)
+        return f"[{agent_name}] message posted to incident channel."
 
-        action = Action(action_type=action_type)
-        obs, reward_obj, done, info = self.env.step(action)
+    def execute_directive(self, target_agent: str, action: str) -> str:
+        """As Incident Commander, issue an action directive to a domain agent."""
+        if self.done:
+            return "Incident resolved or episode ended."
 
-        self.reward += reward_obj.value
-        self.done = done
+        supervisor_approved = True
+        if action in self._penalties and float(self._penalties.get(action, 0)) <= -0.3:
+            supervisor_approved = False
 
-        # Build response text
+        result = self.room.execute_directive(target_agent, action, supervisor_approved)
+        self.reward = self.room.get_total_reward()
+        self.done = result["done"]
+
+        obs = result["observation"]
+        self._domain_observations = result.get("domain_observations", {})
+
         parts = []
         if obs.logs:
             parts.append(f"Logs: {obs.logs}")
-        if obs.config:
-            parts.append(f"Config: {json.dumps(obs.config)}")
-        if obs.system_metrics:
-            parts.append(f"Metrics: {json.dumps(obs.system_metrics)}")
         if obs.system_state:
-            parts.append(f"State: {json.dumps(obs.system_state, default=str)}")
-        if obs.user_messages:
-            parts.append("User Messages:\n" + "\n".join(f"  - {m}" for m in obs.user_messages))
-
-        parts.append(f"Step Reward: {reward_obj.value:.3f}")
-        parts.append(f"Cumulative Reward: {self.reward:.3f}")
-        parts.append(f"Done: {done}")
-
-        if not done:
+            parts.append(f"State: {json.dumps(obs.system_state, indent=2, default=str)}")
+        parts.append(f"Step Reward: {result['reward'].value:.3f}")
+        parts.append(f"Total Reward: {self.reward:.3f}")
+        parts.append(f"Progress: {self.room.get_progress():.0%}")
+        parts.append(f"Done: {self.done}")
+        if not self.done:
             parts.append(f"\nAvailable Actions: {', '.join(self._available_actions)}")
-            parts.append("Choose your next action wisely.")
-
         return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Reward function
-# ---------------------------------------------------------------------------
-
 def reward_func(environments, **kwargs):
-    """Read cumulative reward from each environment instance."""
     return [env.reward for env in environments]
 
 
-# ---------------------------------------------------------------------------
-# Dataset builder
-# ---------------------------------------------------------------------------
-
-def build_dataset(task_types=None):
-    """
-    Build a training dataset of incident prompts from the task JSON files.
-    Each prompt describes an incident and asks the agent to resolve it.
-    """
-    if task_types is None:
-        task_types = ["easy", "medium", "hard"]
-
+def build_dataset():
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(base_dir, "tasks", "cascade.json")
     prompts = []
 
-    task_file_map = {
-        "easy": ("tasks/easy.json", "easy_tasks_dataset"),
-        "medium": ("tasks/medium.json", "medium_tasks_dataset"),
-        "hard": ("tasks/hard.json", "hard_tasks_dataset"),
-        "cascade": ("tasks/cascade.json", "cascade_tasks_dataset"),
-    }
+    with open(filepath, "r") as f:
+        scenarios = json.load(f)["cascade_tasks_dataset"]
 
-    for task_type in task_types:
-        if task_type not in task_file_map:
-            continue
-        filepath, key = task_file_map[task_type]
-        full_path = os.path.join(base_dir, filepath)
-        if not os.path.exists(full_path):
-            print(f"Warning: {full_path} not found, skipping {task_type} tasks")
-            continue
+    for scenario in scenarios:
+        scenario_id = scenario.get("scenario_id", "unknown")
+        description = scenario.get("description", "")
+        playbook = scenario.get("playbook_text", "")
+        actions = scenario.get("available_actions", [])
+        root_cause_kw = scenario.get("root_cause_keywords", [])
+        action_domains = scenario.get("action_domains", {})
 
-        with open(full_path, "r") as f:
-            scenarios = json.load(f)[key]
+        domain_text = ""
+        for domain, acts in action_domains.items():
+            domain_text += f"  {domain}: {', '.join(acts)}\n"
 
-        tag = f"[{task_type.upper()}] " if task_type != "easy" else ""
+        parts = [
+            f"DevOps Incident: {scenario_id}",
+            f"\nDescription: {description}",
+            f"\nPlaybook:\n{playbook}",
+            f"\nAvailable Actions: {', '.join(actions)}",
+            f"\nActions by Domain:\n{domain_text}",
+            f"\nRoot Cause Keywords: {', '.join(root_cause_kw)}",
+            "\nYou are the Incident Commander. Use tools to observe domains, "
+            "communicate findings, and execute directives to resolve this incident.",
+            "You have 7 domain agents: AppOps, InfraOps, DatabaseOps, NetworkOps, SecOps, MiddlewareOps, ObservabilityOps.",
+            "A Supervisor reviews your directives for safety.",
+        ]
 
-        for scenario in scenarios:
-            scenario_id = scenario.get("scenario_id", "unknown")
+        if "initial_state" in scenario:
+            parts.insert(2, f"\nInitial State:\n{json.dumps(scenario['initial_state'], indent=2)}")
 
-            # Build the incident description
-            parts = [f"{tag}DevOps Incident: {scenario_id}"]
+        prompt_text = "\n".join(parts)
+        prompts.append({"prompt": [{"role": "user", "content": prompt_text}]})
 
-            if "observation" in scenario:
-                obs = scenario["observation"]
-                if "user_message" in obs:
-                    parts.append(f"\nIncident Report: {obs['user_message']}")
-
-            if "initial_messages" in scenario:
-                parts.append("\nUser Reports:")
-                for msg in scenario["initial_messages"]:
-                    parts.append(f"  - {msg}")
-
-            if "description" in scenario:
-                parts.append(f"\nDescription: {scenario['description']}")
-
-            parts.append(
-                "\nYou are a DevOps engineer. Analyze this incident and use the "
-                "take_action tool to resolve it step by step."
-            )
-
-            prompt_text = "\n".join(parts)
-            prompts.append({
-                "prompt": [{"role": "user", "content": prompt_text}],
-            })
-
-    # Repeat to ensure enough data for training
     if len(prompts) < 32:
         repeat_factor = max(1, 32 // len(prompts))
         prompts = prompts * repeat_factor
@@ -229,19 +163,12 @@ def build_dataset(task_types=None):
     return Dataset.from_list(prompts)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def main():
-    parser = argparse.ArgumentParser(description="OpsSim-AI GRPO Training")
+    parser = argparse.ArgumentParser(description="OpsSim-AI Multi-Agent GRPO Training")
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B",
                         help="HuggingFace model ID or local path")
     parser.add_argument("--output_dir", type=str, default="./opssim-grpo-output",
                         help="Directory to save model checkpoints")
-    parser.add_argument("--task", type=str, default="all",
-                        choices=["easy", "medium", "hard", "cascade", "all"],
-                        help="Which task difficulty to train on")
     parser.add_argument("--num_train_epochs", type=int, default=3,
                         help="Number of training epochs")
     parser.add_argument("--per_device_batch_size", type=int, default=2,
@@ -252,7 +179,7 @@ def main():
                         help="Maximum completion token length")
     parser.add_argument("--learning_rate", type=float, default=1e-6,
                         help="Learning rate")
-    parser.add_argument("--max_tool_calling_iterations", type=int, default=8,
+    parser.add_argument("--max_tool_calling_iterations", type=int, default=15,
                         help="Max tool-calling rounds per episode")
     parser.add_argument("--use_peft", action="store_true", default=True,
                         help="Use LoRA/PEFT for memory efficiency")
@@ -264,17 +191,10 @@ def main():
                         help="Save checkpoint every N steps")
     args = parser.parse_args()
 
-    # Determine task types
-    if args.task == "all":
-        task_types = ["easy", "medium", "hard", "cascade"]
-    else:
-        task_types = [args.task]
-
-    print(f"Building dataset for task types: {task_types}")
-    dataset = build_dataset(task_types)
+    print("Building multi-agent training dataset...")
+    dataset = build_dataset()
     print(f"Dataset size: {len(dataset)} prompts")
 
-    # PEFT config for memory-efficient training
     peft_config = None
     if args.use_peft and not args.no_peft:
         try:
@@ -289,9 +209,7 @@ def main():
             print("Using LoRA with r=16, alpha=32")
         except ImportError:
             print("Warning: peft not installed, training without LoRA")
-            peft_config = None
 
-    # Training config
     training_args = GRPOConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -315,13 +233,12 @@ def main():
         args=training_args,
         train_dataset=dataset,
         reward_funcs=reward_func,
-        environment_factory=OpsSIMTrainingEnv,
+        environment_factory=MultiAgentTrainingEnv,
         peft_config=peft_config,
     )
 
     trainer.train()
 
-    # Save final model
     trainer.save_model(os.path.join(args.output_dir, "final"))
     print(f"Training complete. Model saved to {args.output_dir}/final")
 

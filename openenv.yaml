@@ -1,16 +1,17 @@
 name: opssim_ai
-description: RL environment for DevOps simulation
-version: "0.1.0"
+description: "OpsSim-AI: 9-Agent Distributed War Room — Cascading Failure System"
+version: "2.0.0"
 authors:
   - Sandeep
   - Venkatesh
   - Nithish
 tags:
   - openenv
+  - multi-agent
+  - cascading-failure
+  - 9-agent
+  - partial-observability
 entry_point: env:DevOpsEnv
 
 tasks:
-  - name: easy
-  - name: medium
-  - name: hard
   - name: cascade
