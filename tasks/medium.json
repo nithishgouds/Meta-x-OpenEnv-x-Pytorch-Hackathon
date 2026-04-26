@@ -1,0 +1,942 @@
+{
+  "medium_tasks_dataset": [
+    {
+      "scenario_id": "medium_001_weekend_bug",
+      "initial_state": {
+        "bug_active": true,
+        "analysis_complete": false,
+        "target_identified": false,
+        "metrics": {
+          "cpu": "35%",
+          "error_rate": "0.01%"
+        }
+      },
+      "initial_logs": "[INFO] All payment microservices reporting healthy status.\n[INFO] Routine automated database backups completed.",
+      "initial_messages": [
+        "Payments keep failing today.",
+        "Why is checkout broken again this Saturday?",
+        "It worked perfectly fine yesterday, but I can't buy anything right now."
+      ],
+      "available_actions": [
+        "analyze_failure_timestamps",
+        "isolate_date_parsing_logic",
+        "deploy_weekend_date_patch",
+        "restart_payment_gateway",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "analyze_failure_timestamps": {
+          "condition": "analysis_complete == false",
+          "effects": {
+            "analysis_complete": true
+          },
+          "reward": 0.3,
+          "log_impact": "Correlated user tickets with system time. Found a 100% failure rate occurring exclusively on weekends.",
+          "hint": "The pattern points to a temporal logic issue. Identify the specific component handling dates.",
+          "user_messages": [
+            "Support queue is still filling up with complaints about failing transactions."
+          ],
+          "else_reward": -0.1,
+          "else_log_impact": "Analysis already complete. No new insights found in timestamps.",
+          "else_hint": "Move on to identifying the target logic."
+        },
+        "isolate_date_parsing_logic": {
+          "condition": "analysis_complete == true AND target_identified == false",
+          "effects": {
+            "target_identified": true
+          },
+          "reward": 0.3,
+          "log_impact": "Isolated the failing component to the 'DateValidator' utility in the checkout service.",
+          "hint": "The root cause is a business-logic flaw in how weekends are parsed. Apply the specific patch.",
+          "user_messages": [
+            "Still getting reports of the issue from weekend shoppers."
+          ],
+          "else_reward": -0.2,
+          "else_log_impact": "Cannot isolate target without analyzing timestamps first, OR target is already isolated.",
+          "else_hint": "Check if analysis is done, or proceed to patch the logic."
+        },
+        "deploy_weekend_date_patch": {
+          "condition": "target_identified == true",
+          "effects": {
+            "bug_active": false
+          },
+          "reward": 1.0,
+          "log_impact": "Weekend date parsing patch deployed successfully to 'DateValidator'.",
+          "hint": "Monitor user feedback to confirm transaction resolution.",
+          "user_messages": [
+            "Hey, my payment finally went through!",
+            "Thanks, checkout is working normally again."
+          ],
+          "else_reward": -0.5,
+          "else_log_impact": "Attempted to deploy patch blindly. Failed due to missing target context.",
+          "else_hint": "You cannot guess the fix. Analyze the failure timestamps first."
+        },
+        "restart_payment_gateway": {
+          "condition": "true",
+          "effects": {},
+          "reward": -0.2,
+          "log_impact": "Payment gateway restarted. Metrics remain stable.",
+          "hint": "Restarting didn't change the user experience. The bug is deeper in the application logic.",
+          "user_messages": [
+            "The site went down for a second, but my card is still getting declined."
+          ]
+        }
+      },
+      "success_condition": [
+        "bug_active == false"
+      ]
+    },
+    {
+      "scenario_id": "medium_002_mobile_crash",
+      "initial_state": {
+        "bug_active": true,
+        "analysis_complete": false,
+        "target_identified": false,
+        "metrics": {
+          "cpu": "42%",
+          "error_rate": "0.03%"
+        }
+      },
+      "initial_logs": "[INFO] Web frontend instances reporting 200 OK.\n[INFO] API Gateway latency nominal.",
+      "initial_messages": [
+        "I can't check out on my iPhone.",
+        "App crashes when I hit pay, but my laptop worked fine.",
+        "iOS app is completely broken for checkout since this morning."
+      ],
+      "available_actions": [
+        "correlate_client_device_logs",
+        "identify_api_version_mismatch",
+        "rollback_ios_checkout_endpoint",
+        "restart_checkout_service",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "correlate_client_device_logs": {
+          "condition": "analysis_complete == false",
+          "effects": {
+            "analysis_complete": true
+          },
+          "reward": 0.3,
+          "log_impact": "Correlated user agent strings. Found 100% of checkout failures originate from iOS native application clients.",
+          "hint": "The pattern points to a mobile-specific integration issue. Identify the failing API component.",
+          "user_messages": [
+            "People are leaving negative reviews on the App Store now."
+          ],
+          "else_reward": -0.1,
+          "else_log_impact": "Client log analysis already complete. No new insights.",
+          "else_hint": "Move on to identifying the target mismatch."
+        },
+        "identify_api_version_mismatch": {
+          "condition": "analysis_complete == true AND target_identified == false",
+          "effects": {
+            "target_identified": true
+          },
+          "reward": 0.3,
+          "log_impact": "Isolated the failing component: iOS app v2.1 is attempting to hit deprecated v1 checkout endpoint parameters.",
+          "hint": "The root cause is an API versioning mismatch. Rollback the endpoint change to restore iOS functionality.",
+          "user_messages": [
+            "Still seeing a spike in iOS crash reports."
+          ],
+          "else_reward": -0.2,
+          "else_log_impact": "Cannot identify API mismatch without analyzing client logs first, OR target already identified.",
+          "else_hint": "Check if analysis is done, or proceed to rollback."
+        },
+        "rollback_ios_checkout_endpoint": {
+          "condition": "target_identified == true",
+          "effects": {
+            "bug_active": false
+          },
+          "reward": 1.0,
+          "log_impact": "Successfully rolled back the v1 checkout endpoint deprecation.",
+          "hint": "Monitor iOS user feedback to confirm resolution.",
+          "user_messages": [
+            "Finally, the app isn't crashing anymore.",
+            "Checkout successful on my iPhone 14."
+          ],
+          "else_reward": -0.5,
+          "else_log_impact": "Attempted to alter endpoint blindly. Failed due to missing target version context.",
+          "else_hint": "You cannot guess the fix. Correlate the device logs first."
+        },
+        "restart_checkout_service": {
+          "condition": "true",
+          "effects": {},
+          "reward": -0.2,
+          "log_impact": "Checkout microservice restarted. Web traffic uninterrupted.",
+          "hint": "Restarting the service didn't fix the mobile integration. The bug is in the API contract.",
+          "user_messages": [
+            "I tried restarting my phone and your app, it still crashes on checkout."
+          ]
+        }
+      },
+      "success_condition": [
+        "bug_active == false"
+      ]
+    },
+    {
+      "scenario_id": "medium_003_timezone_trap",
+      "initial_state": {
+        "bug_active": true,
+        "analysis_complete": false,
+        "target_identified": false,
+        "metrics": {
+          "cpu": "28%",
+          "error_rate": "0.02%"
+        }
+      },
+      "initial_logs": "[INFO] Auth service cluster stable.\n[INFO] Redis session cache hit rate > 98%.",
+      "initial_messages": [
+        "I keep getting logged out immediately after signing in from Tokyo.",
+        "Session expires instantly in India. Cannot use the dashboard.",
+        "Why can't I stay logged in? I'm in Sydney and it just loops."
+      ],
+      "available_actions": [
+        "analyze_geographic_login_data",
+        "isolate_token_expiry_logic",
+        "patch_auth_token_utc_standard",
+        "restart_auth_service",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "analyze_geographic_login_data": {
+          "condition": "analysis_complete == false",
+          "effects": {
+            "analysis_complete": true
+          },
+          "reward": 0.3,
+          "log_impact": "Correlated IP addresses with session drops. Found failures strictly isolated to users operating ahead of UTC (Asia/Australia).",
+          "hint": "The pattern points to a timezone discrepancy. Identify the component generating session tokens.",
+          "user_messages": [
+            "International users are still locked out."
+          ],
+          "else_reward": -0.1,
+          "else_log_impact": "Geographic analysis already complete. No new insights.",
+          "else_hint": "Move on to identifying the flawed token logic."
+        },
+        "isolate_token_expiry_logic": {
+          "condition": "analysis_complete == true AND target_identified == false",
+          "effects": {
+            "target_identified": true
+          },
+          "reward": 0.3,
+          "log_impact": "Isolated the failing component: 'JWT_Generator' is hardcoding token issuance times to the server's local EST timezone instead of UTC.",
+          "hint": "The root cause is a timezone offset invalidating tokens instantly for Eastern hemisphere users. Apply the UTC patch.",
+          "user_messages": [
+            "Still getting the 'Session Expired' loop."
+          ],
+          "else_reward": -0.2,
+          "else_log_impact": "Cannot isolate token logic without geographic analysis first, OR target already identified.",
+          "else_hint": "Check if analysis is done, or proceed to patch."
+        },
+        "patch_auth_token_utc_standard": {
+          "condition": "target_identified == true",
+          "effects": {
+            "bug_active": false
+          },
+          "reward": 1.0,
+          "log_impact": "JWT_Generator patched to strictly enforce UTC for all token timestamps.",
+          "hint": "Monitor international user sessions to confirm resolution.",
+          "user_messages": [
+            "I'm finally able to log in from Japan.",
+            "Working perfectly in Sydney now, thanks."
+          ],
+          "else_reward": -0.5,
+          "else_log_impact": "Attempted to patch auth logic blindly. Failed due to missing geographic context.",
+          "else_hint": "You cannot guess the fix. Analyze the geographic login data first."
+        },
+        "restart_auth_service": {
+          "condition": "true",
+          "effects": {},
+          "reward": -0.2,
+          "log_impact": "Auth microservices restarted. Active sessions preserved.",
+          "hint": "Restarting the service didn't fix the token generation flaw. Look at the code logic.",
+          "user_messages": [
+            "I saw a brief connection error, and now it's back to instantly logging me out."
+          ]
+        }
+      },
+      "success_condition": [
+        "bug_active == false"
+      ]
+    },
+    {
+      "scenario_id": "med_004_stale_cache_race",
+      "domain": "Database/Caching",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "cpu": "20%", "memory": "40%", "cache_hit_rate": "99%" }
+      },
+      "initial_logs": "[INFO] Redis cluster healthy. All keys synchronized.",
+      "initial_messages": ["I updated my profile, but the old name still shows up.", "Changes are only visible after I log out and back in."],
+      "available_actions": ["trace_cache_invalidation_events", "isolate_race_condition_key", "apply_mutex_lock_patch", "flush_all_cache"],
+      "transition_rules": {
+        "trace_cache_invalidation_events": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found that invalidation signals are arriving before the DB write completes.",
+          "hint": "[HINT]: A race condition exists. Isolate the specific key logic.",
+          "else_reward": -0.1
+        },
+        "isolate_race_condition_key": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Identified 'user_profile_data' as the key lacking write-consistency.",
+          "hint": "[HINT]: Implement a mutex lock to prevent stale reads.",
+          "else_reward": -0.2
+        },
+        "apply_mutex_lock_patch": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Mutex lock applied to profile updates. Cache consistency restored.",
+          "hint": "[HINT]: Problem resolved. Users see updates immediately.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_005_db_collation_mismatch",
+      "domain": "Database/Caching",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "db_connections": "active", "query_latency": "12ms" }
+      },
+      "initial_logs": "[INFO] PostgreSQL reporting 0 syntax errors. All migrations successful.",
+      "initial_messages": ["Searching for 'Résumé' returns no results.", "Special characters are causing search to skip valid entries."],
+      "available_actions": ["audit_table_collations", "identify_mismatched_index", "rebuild_index_with_utf8", "restart_db"],
+      "transition_rules": {
+        "audit_table_collations": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found that the 'search_index' uses Latin1 while the table uses UTF-8.",
+          "hint": "[HINT]: The index is case-insensitive but character-blind. Find the specific index.",
+          "else_reward": -0.1
+        },
+        "identify_mismatched_index": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Target found: 'idx_user_bio' is using the wrong collation provider.",
+          "hint": "[HINT]: Rebuild the index with the correct provider.",
+          "else_reward": -0.2
+        },
+        "rebuild_index_with_utf8": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Index rebuilt. Accent-sensitive searches now functioning.",
+          "hint": "[HINT]: System recovered.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_006_cors_preflight_fail",
+      "domain": "Networking/Security",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "gateway_status": "green", "ingress_latency": "5ms" }
+      },
+      "initial_logs": "[INFO] WAF allowed all traffic. SSL handshake successful.",
+      "initial_messages": ["The website loads but I can't click 'Submit'.", "Console shows 'Access-Control-Allow-Origin' errors on the staging domain."],
+      "available_actions": ["inspect_browser_preflight_requests", "identify_wildcard_restriction", "update_cors_policy", "rotate_ssl_certs"],
+      "transition_rules": {
+        "inspect_browser_preflight_requests": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: OPTIONS requests are returning 403 for specific subdomains.",
+          "hint": "[HINT]: The CORS policy is too restrictive. Locate the policy entry.",
+          "else_reward": -0.1
+        },
+        "identify_wildcard_restriction": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Target: The API Gateway CORS config is missing the 'staging.acme.com' origin.",
+          "hint": "[HINT]: Update the policy to include the missing origin.",
+          "else_reward": -0.2
+        },
+        "update_cors_policy": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: CORS policy updated. Preflight checks passing.",
+          "hint": "[HINT]: Users can now submit forms.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_007_mtu_black_hole",
+      "domain": "Networking/Security",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "packet_loss": "0%", "link_state": "up" }
+      },
+      "initial_logs": "[INFO] Core routers reporting healthy BGP neighbors.",
+      "initial_messages": ["Small pages load fine, but large file downloads hang at 99%.", "SSH works, but SCP of large logs times out."],
+      "available_actions": ["perform_path_mtu_discovery", "identify_icmp_blockage", "adjust_mss_clamping", "reboot_router"],
+      "transition_rules": {
+        "perform_path_mtu_discovery": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Packets > 1460 bytes are being dropped without ICMP 'fragmentation needed' messages.",
+          "hint": "[HINT]: An intermediate node is a 'Black Hole'. Identify where ICMP is blocked.",
+          "else_reward": -0.1
+        },
+        "identify_icmp_blockage": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The VPN concentrator is dropping ICMP Type 3, Code 4.",
+          "hint": "[HINT]: Adjust TCP MSS clamping to bypass the MTU limitation.",
+          "else_reward": -0.2
+        },
+        "adjust_mss_clamping": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: MSS clamping set to 1350. Large packets now traverse correctly.",
+          "hint": "[HINT]: Downloads restored.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_008_webhook_signature_mismatch",
+      "domain": "Application Logic",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "api_uptime": "100%", "cpu_load": "10%" }
+      },
+      "initial_logs": "[INFO] Webhook listener received 500 requests. Status 200 OK sent back.",
+      "initial_messages": ["Stripe says payments are successful, but orders are not marked as 'Paid' in our system.", "Our fulfillment service isn't triggering after checkout."],
+      "available_actions": ["audit_webhook_secret_logs", "isolate_signing_algorithm_change", "update_hmac_secret", "restart_listener"],
+      "transition_rules": {
+        "audit_webhook_secret_logs": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found that internal validation is silently failing signatures.",
+          "hint": "[HINT]: The signing logic is rejecting the payload. Check for algorithm updates.",
+          "else_reward": -0.1
+        },
+        "isolate_signing_algorithm_change": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Stripe updated to SHA-256 while we are still using SHA-1.",
+          "hint": "[HINT]: Update the HMAC secret and algorithm.",
+          "else_reward": -0.2
+        },
+        "update_hmac_secret": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Algorithm updated to SHA-256. Webhooks now validating correctly.",
+          "hint": "[HINT]: Order processing resumed.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_009_orphaned_spot_instance_dns",
+      "domain": "Cloud/Infra",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "instance_count": "5/5", "healthy_nodes": "5" }
+      },
+      "initial_logs": "[INFO] Auto-scaling group reporting all instances healthy.",
+      "initial_messages": ["Randomly, some requests fail with 'Connection Refused'.", "It works for me, but my colleague gets a 404 on the same URL."],
+      "available_actions": ["query_dns_resolver_cache", "identify_stale_ip_in_record", "purge_route53_stale_entry", "terminate_all_instances"],
+      "transition_rules": {
+        "query_dns_resolver_cache": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The internal Load Balancer DNS is returning 6 IPs, but we only have 5 active nodes.",
+          "hint": "[HINT]: One IP belongs to a terminated spot instance. Identify the orphaned IP.",
+          "else_reward": -0.1
+        },
+        "identify_stale_ip_in_record": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Target found: 10.0.4.52 is still in the DNS pool despite the instance being gone.",
+          "hint": "[HINT]: Purge the stale entry from the DNS provider.",
+          "else_reward": -0.2
+        },
+        "purge_route53_stale_entry": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Stale record removed. Traffic now routing only to active nodes.",
+          "hint": "[HINT]: Intermittent failures resolved.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_010_iam_propagation_delay",
+      "domain": "Cloud/Infra",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "iam_status": "synced", "api_retries": "0" }
+      },
+      "initial_logs": "[INFO] CloudTrail shows 'AccessDenied' but the policy was attached 10 mins ago.",
+      "initial_messages": ["The new Lambda can't write to S3.", "It says 'Permission Denied' even though I added the S3FullAccess role."],
+      "available_actions": ["trace_iam_policy_attachment", "identify_eventual_consistency_lag", "force_iam_role_refresh", "recreate_lambda"],
+      "transition_rules": {
+        "trace_iam_policy_attachment": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Policy is attached but global IAM propagation is lagging in this region.",
+          "hint": "[HINT]: This is a silent cloud provider delay. Identify the affected role ARN.",
+          "else_reward": -0.1
+        },
+        "identify_eventual_consistency_lag": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Role 'AppWriterRole' is in a transition state across availability zones.",
+          "hint": "[HINT]: Force a metadata refresh or wait for sync.",
+          "else_reward": -0.2
+        },
+        "force_iam_role_refresh": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Metadata token refreshed. Lambda now has S3 access.",
+          "hint": "[HINT]: Deployment successful.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_011_ebs_io_throttling",
+      "domain": "Cloud/Infra",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "volume_idle": "90%", "read_latency": "green" }
+      },
+      "initial_logs": "[INFO] CloudWatch metrics show standard IOPS usage. No alarms.",
+      "initial_messages": ["The app feels sluggish during peak hours.", "Database saves take forever, but CPU is at 5%."],
+      "available_actions": ["check_ebs_burst_balance", "identify_gp2_baseline_exhaustion", "upgrade_to_gp3_volume", "restart_instance"],
+      "transition_rules": {
+        "check_ebs_burst_balance": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found the EBS Burst Balance is at 0%.",
+          "hint": "[HINT]: The volume is being throttled to baseline IOPS silently. Identify the disk.",
+          "else_reward": -0.1
+        },
+        "identify_gp2_baseline_exhaustion": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Target: /dev/sda1 (gp2) is too small to sustain current IOPS baseline.",
+          "hint": "[HINT]: Upgrade to a gp3 volume for consistent throughput.",
+          "else_reward": -0.2
+        },
+        "upgrade_to_gp3_volume": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Volume upgraded to gp3 with 3000 provisioned IOPS.",
+          "hint": "[HINT]: Throttling resolved.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_012_utf8_bom_crash",
+      "domain": "Application Logic",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "process_up": "true", "error_log": "empty" }
+      },
+      "initial_logs": "[INFO] Config file parsed. Server started.",
+      "initial_messages": ["Some users can't login, they get a blank page.", "It only happens for users with Swedish characters in their names."],
+      "available_actions": ["hex_dump_input_stream", "identify_byte_order_mark", "strip_bom_from_parser", "restart_app"],
+      "transition_rules": {
+        "hex_dump_input_stream": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found hidden bytes 'EF BB BF' at the start of the user payload.",
+          "hint": "[HINT]: A Byte Order Mark (BOM) is breaking the JSON parser. Identify the specific handler.",
+          "else_reward": -0.1
+        },
+        "identify_byte_order_mark": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The 'UserAuth' middleware doesn't expect BOM headers.",
+          "hint": "[HINT]: Patch the middleware to strip the BOM.",
+          "else_reward": -0.2
+        },
+        "strip_bom_from_parser": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Middleware updated. BOM bytes are now ignored.",
+          "hint": "[HINT]: Swedish users can now log in.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_013_expired_intermediate_cert",
+      "domain": "Networking/Security",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "ssl_expiry": "300 days", "port_443": "open" }
+      },
+      "initial_logs": "[INFO] Main certificate is valid until 2027.",
+      "initial_messages": ["Old Android phones get 'Insecure Connection' errors.", "The site works on Chrome but fails in our legacy Java client."],
+      "available_actions": ["verify_full_cert_chain", "identify_expired_intermediate", "update_ca_bundle_on_lb", "renew_main_cert"],
+      "transition_rules": {
+        "verify_full_cert_chain": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The leaf cert is fine, but the intermediate 'R3' cert expired yesterday.",
+          "hint": "[HINT]: Modern browsers have it cached, but older clients fail. Locate the chain config.",
+          "else_reward": -0.1
+        },
+        "identify_expired_intermediate": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The Load Balancer is serving an outdated intermediate chain file.",
+          "hint": "[HINT]: Update the CA bundle on the Load Balancer.",
+          "else_reward": -0.2
+        },
+        "update_ca_bundle_on_lb": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Full chain updated. Legacy clients now trust the connection.",
+          "hint": "[HINT]: SSL issues resolved.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_014_batch_off_by_one",
+      "domain": "Application Logic",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "batch_status": "success", "rows_processed": "1000" }
+      },
+      "initial_logs": "[INFO] Nightly batch job finished with 0 errors.",
+      "initial_messages": ["One customer always gets skipped in the monthly report.", "The last person in alphabetical order never gets their invoice."],
+      "available_actions": ["debug_loop_boundary_conditions", "isolate_array_index_error", "fix_loop_termination_logic", "rerun_batch"],
+      "transition_rules": {
+        "debug_loop_boundary_conditions": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found that the loop uses '< count' instead of '<= count' for the processing array.",
+          "hint": "[HINT]: This is a classic off-by-one. Identify where the array is indexed.",
+          "else_reward": -0.1
+        },
+        "isolate_array_index_error": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The 'InvoiceGenerator' class stops one element short of the list size.",
+          "hint": "[HINT]: Fix the loop termination logic to include the last element.",
+          "else_reward": -0.2
+        },
+        "fix_loop_termination_logic": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Loop fixed. Last element is now correctly processed.",
+          "hint": "[HINT]: All customers now receive invoices.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_015_stale_cache_keys",
+      "domain": "Database/Caching",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "cache_usage": "low", "latency": "2ms" }
+      },
+      "initial_logs": "[INFO] Cache clean-up task completed successfully.",
+      "initial_messages": ["Deleting a product doesn't remove it from the home page.", "Out-of-stock items still appear as 'Available' for hours."],
+      "available_actions": ["audit_cache_eviction_policy", "identify_hardcoded_ttl", "patch_cache_invalidation_logic", "clear_redis"],
+      "transition_rules": {
+        "audit_cache_eviction_policy": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Eviction is working, but the Home Page key has a 24h hardcoded TTL.",
+          "hint": "[HINT]: Passive eviction is too slow. Find where the TTL is set.",
+          "else_reward": -0.1
+        },
+        "identify_hardcoded_ttl": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Found 'HomePage_Cache' key in the product-service with a fixed 86400s TTL.",
+          "hint": "[HINT]: Implement an active invalidation on product change.",
+          "else_reward": -0.2
+        },
+        "patch_cache_invalidation_logic": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Code patched to delete 'HomePage_Cache' when a product is deleted.",
+          "hint": "[HINT]: Home page now reflects current inventory.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_016_dns_search_suffix_loop",
+      "domain": "Networking/Security",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "dns_errors": "0", "latency": "increased" }
+      },
+      "initial_logs": "[INFO] Resolv.conf verified. All internal lookups successful.",
+      "initial_messages": ["External API calls are extremely slow today.", "Pinging google.com takes 2 seconds, but we have fiber."],
+      "available_actions": ["sniff_dns_outbound_traffic", "identify_search_suffix_leak", "optimize_resolv_ndots", "restart_dns_masq"],
+      "transition_rules": {
+        "sniff_dns_outbound_traffic": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Every query for 'api.stripe.com' is first trying 'api.stripe.com.internal.prod'.",
+          "hint": "[HINT]: The DNS resolver is appending internal suffixes to external domains. Check ndots.",
+          "else_reward": -0.1
+        },
+        "identify_search_suffix_leak": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: ndots is set to 5, forcing multi-dot external domains through the search list.",
+          "hint": "[HINT]: Lower ndots to 1 in the cluster config.",
+          "else_reward": -0.2
+        },
+        "optimize_resolv_ndots": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: ndots reduced to 1. External lookups now go directly to root.",
+          "hint": "[HINT]: Latency restored.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_017_ghost_log_rotation",
+      "domain": "Cloud/Infra",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "disk_free": "80%", "cpu": "12%" }
+      },
+      "initial_logs": "[INFO] logrotate ran at 04:00. Files compressed.",
+      "initial_messages": ["I can't see the logs from 5 minutes ago.", "The app is running, but the log file is empty and not growing."],
+      "available_actions": ["check_fd_leaks_on_deleted_files", "identify_unrestarted_service", "signal_hup_to_process", "restart_logging_daemon"],
+      "transition_rules": {
+        "check_fd_leaks_on_deleted_files": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: The app is still writing to a deleted file descriptor (inode) from before rotation.",
+          "hint": "[HINT]: logrotate moved the file, but the app didn't release the handle. Identify the process.",
+          "else_reward": -0.1
+        },
+        "identify_unrestarted_service": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Process 'JavaAPI' (PID 402) has a handle on a (deleted) log file.",
+          "hint": "[HINT]: Send a SIGHUP or restart the process to force a file reopen.",
+          "else_reward": -0.2
+        },
+        "signal_hup_to_process": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: SIGHUP sent. App has reopened the new log file.",
+          "hint": "[HINT]: Logs are now appearing again.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_018_app_deadlock_on_health_check",
+      "domain": "Application Logic",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "health_endpoint": "200 OK", "response_time": "green" }
+      },
+      "initial_logs": "[INFO] Health check passed. Load balancer considers node healthy.",
+      "initial_messages": ["The app is completely frozen for users.", "Login clicks don't even trigger a loading spinner."],
+      "available_actions": ["capture_thread_dump", "identify_deadlocked_threads", "refactor_connection_pool_limits", "restart_app"],
+      "transition_rules": {
+        "capture_thread_dump": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Thread dump shows 50 threads waiting on a single DB connection.",
+          "hint": "[HINT]: The health check uses a separate pool, so it stays green while users starve. Identify the deadlock.",
+          "else_reward": -0.1
+        },
+        "identify_deadlocked_threads": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Deadlock found between the Auth filter and the Billing service call.",
+          "hint": "[HINT]: Increase the connection pool limits and add timeouts.",
+          "else_reward": -0.2
+        },
+        "refactor_connection_pool_limits": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Pool limits increased. Timeouts added to prevent indefinite waiting.",
+          "hint": "[HINT]: App responsiveness restored.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_019_silent_storage_throttling",
+      "domain": "Cloud/Infra",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "disk_utilization": "50%", "io_wait": "0%" }
+      },
+      "initial_logs": "[INFO] Local OS metrics show no high I/O wait. Hardware healthy.",
+      "initial_messages": ["Saving a 1MB file takes 30 seconds.", "Our CI/CD builds are taking 4x longer than usual today."],
+      "available_actions": ["check_cloud_provider_storage_metrics", "identify_io_credit_exhaustion", "reprovision_with_higher_iops", "restart_build_agent"],
+      "transition_rules": {
+        "check_cloud_provider_storage_metrics": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Cloud Console shows 'BurstCreditBalance' is 0, but the guest OS doesn't see the throttle.",
+          "hint": "[HINT]: This is storage-level throttling. Identify the volume id.",
+          "else_reward": -0.1
+        },
+        "identify_io_credit_exhaustion": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Volume vol-08af3 is being throttled to 100 IOPS.",
+          "hint": "[HINT]: Re-provision the volume with a higher baseline or fixed IOPS.",
+          "else_reward": -0.2
+        },
+        "reprovision_with_higher_iops": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Volume re-provisioned to gp3. Build speeds normalized.",
+          "hint": "[HINT]: Performance recovered.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    },
+    {
+      "scenario_id": "med_020_api_gw_timeout_mismatch",
+      "domain": "Networking/Security",
+      "initial_state": {
+        "bug_active": true,
+        "investigation_done": false,
+        "target_found": false,
+        "metrics": { "upstream_status": "200", "gateway_errors": "0" }
+      },
+      "initial_logs": "[INFO] Backend service processes all requests in 29 seconds successfully.",
+      "initial_messages": ["I get a 'Gateway Timeout' error exactly at 30 seconds.", "Long reports never finish loading, they just cut off."],
+      "available_actions": ["audit_gateway_timeout_config", "identify_hop_limit_bottleneck", "sync_gateway_and_backend_timeouts", "restart_gateway"],
+      "transition_rules": {
+        "audit_gateway_timeout_config": {
+          "condition": "investigation_done == false",
+          "effects": { "investigation_done": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Gateway timeout is 30s, but the backend allows 60s processing.",
+          "hint": "[HINT]: The gateway is killing the connection while the backend is still working. Identify the config line.",
+          "else_reward": -0.1
+        },
+        "identify_hop_limit_bottleneck": {
+          "condition": "investigation_done == true AND target_found == false",
+          "effects": { "target_found": true },
+          "reward": 0.3,
+          "log_impact": "[IMPACT]: Target: Ingress-NGINX 'proxy-read-timeout' is set too low.",
+          "hint": "[HINT]: Synchronize the gateway timeout to be slightly higher than the backend.",
+          "else_reward": -0.2
+        },
+        "sync_gateway_and_backend_timeouts": {
+          "condition": "target_found == true",
+          "effects": { "bug_active": false },
+          "reward": 1.0,
+          "log_impact": "[IMPACT]: Gateway timeout set to 65s. Long reports now complete.",
+          "hint": "[HINT]: Timeout issues resolved.",
+          "else_reward": -0.5
+        }
+      },
+      "success_condition": ["bug_active == false"]
+    }
+  ]
+}

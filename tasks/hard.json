@@ -1,0 +1,1513 @@
+{
+  "hard_tasks_dataset": [
+    {
+      "scenario_id": "hard_001_ecommerce_black_friday",
+      "domain": "Microservices & API Management",
+      "description": "A massive traffic spike is causing cascading failures across the e-commerce cluster...",
+      "initial_state": {
+        "overall_cpu_load": 180,
+        "services": {
+          "payment_gateway": {"status": "degraded", "cpu_usage": 40},
+          "checkout_cart": {"status": "failing", "cpu_usage": 50},
+          "recommendation_engine": {"status": "online", "cpu_usage": 60},
+          "user_analytics": {"status": "online", "cpu_usage": 30}
+        }
+      },
+      "playbook_text": "SLA PLAYBOOK - RETAIL OPS: 1. Payment processing is our lifeblood; NEVER throttle or shutdown payment_gateway. 2. If cluster CPU exceeds 100%, gracefully degrade the user_analytics and recommendation_engine entirely. 3. Checkout cart must be restored to full function.",
+      "penalties": {
+        "throttle(payment_gateway)": -1.0,
+        "shutdown(payment_gateway)": -1.0,
+        "restart(payment_gateway)": -0.5
+      },
+      "optimal_solution_path": [
+        "shutdown(user_analytics)",
+        "shutdown(recommendation_engine)",
+        "restart(checkout_cart)"
+      ],
+      "available_actions": [
+        "shutdown(user_analytics)",
+        "shutdown(recommendation_engine)",
+        "shutdown(payment_gateway)",
+        "restart(checkout_cart)",
+        "restart(payment_gateway)",
+        "throttle(payment_gateway)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "shutdown(user_analytics)": {
+          "condition": "services.user_analytics.status != 'offline'",
+          "effects": {
+            "services.user_analytics.status": "offline",
+            "overall_cpu_load": "-30"
+          }
+        },
+        "shutdown(recommendation_engine)": {
+          "condition": "services.recommendation_engine.status != 'offline'",
+          "effects": {
+            "services.recommendation_engine.status": "offline",
+            "overall_cpu_load": "-60"
+          }
+        },
+        "restart(checkout_cart)": {
+          "condition": "overall_cpu_load <= 100",
+          "effects": {
+            "services.checkout_cart.status": "online"
+          },
+          "else_effects": {
+            "services.checkout_cart.status": "failing"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "services.payment_gateway.status == 'failing' OR services.payment_gateway.status == 'degraded'",
+          "penalty": -0.30
+        },
+        {
+          "condition": "services.checkout_cart.status == 'failing'",
+          "penalty": -0.15
+        },
+        {
+          "condition": "overall_cpu_load > 100",
+          "penalty": -0.05
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "services.checkout_cart.status == 'online'",
+          "overall_cpu_load <= 100",
+          "services.user_analytics.status == 'offline' OR services.recommendation_engine.status == 'offline'"
+        ],
+        "forbidden": [
+          "services.payment_gateway.status == 'offline'",
+          "services.payment_gateway.status == 'throttled'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "services.checkout_cart.status == 'online'",
+        "overall_cpu_load <= 100",
+        "services.user_analytics.status == 'offline' OR services.recommendation_engine.status == 'offline'"
+      ]
+    },
+    {
+      "scenario_id": "hard_002_security_data_exfiltration",
+      "domain": "Networking & Security Operations",
+      "description": "An apparent DDoS attack is masking a subtle database exfiltration event...",
+      "initial_state": {
+        "edge_router_traffic": "900 Gbps",
+        "waf_status": "overloaded",
+        "internal_db_outbound_connections": 5000,
+        "public_api_status": "failing"
+      },
+      "playbook_text": "SLA PLAYBOOK - SEC-OPS: 1. Public API uptime is guaranteed. 2. If you suspect an active database breach or unauthorized bulk export, isolate the internal_db by dropping its VPC network interface immediately, even if it causes a total Public API outage. Data loss is legally fatal.",
+      "penalties": {
+        "reboot(internal_db)": -0.4
+      },
+      "optimal_solution_path": [
+        "check_logs(internal_db)", 
+        "drop_network_interface(internal_db)",
+        "notify_security_team(severity=critical)"
+      ],
+      "available_actions": [
+        "check_logs(internal_db)",
+        "drop_network_interface(internal_db)",
+        "notify_security_team(severity=critical)",
+        "reboot(internal_db)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "check_logs(internal_db)": {
+          "condition": "true",
+          "effects": {}
+        },
+        "drop_network_interface(internal_db)": {
+          "condition": "true",
+          "effects": {
+            "internal_db_outbound_connections": 0
+          }
+        },
+        "notify_security_team(severity=critical)": {
+          "condition": "internal_db_outbound_connections == 0",
+          "effects": {
+            "public_api_status": "scrubbed_and_stable"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "public_api_status == 'failing'",
+          "penalty": -0.05
+        },
+        {
+          "condition": "internal_db_outbound_connections > 0",
+          "penalty": -0.40
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "public_api_status == 'scrubbed_and_stable'",
+          "internal_db_outbound_connections == 0"
+        ],
+        "forbidden": [
+          "waf_status == 'offline'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "public_api_status == 'scrubbed_and_stable'",
+        "internal_db_outbound_connections == 0"
+      ]
+    },
+    {
+      "scenario_id": "hard_003_cloud_runaway_spend",
+      "domain": "FinOps & Compute Scaling",
+      "description": "A misconfigured auto-scaling group is burning thousands of dollars an hour on GPU instances while core API services are starving for standard compute.",
+      "initial_state": {
+        "hourly_burn_rate": 12500,
+        "gpu_nodes_active": 150,
+        "standard_nodes_active": 10,
+        "async_batch_queue": "backed_up",
+        "core_auth_api": "throttling"
+      },
+      "playbook_text": "SLA PLAYBOOK - FIN-OPS: 1. Hard cap on AWS hourly spend is $2,000/hr. Any runaway scaling must be terminated immediately. 2. The core_auth_api must remain responsive; provision standard nodes if it throttles. 3. The async_batch_queue (used for ML training) has a 24-hour SLA. If budget is constrained, freeze the batch queue and terminate all GPU nodes EXCEPT those tagged 'production_inference'.",
+      "penalties": {
+        "terminate_instances(type=gpu_production_inference)": -0.8
+      },
+      "optimal_solution_path": [
+        "freeze_queue(async_batch_queue)",
+        "terminate_instances(type=gpu, exclude_tag=production_inference)",
+        "scale_up(core_auth_api, nodes=5)"
+      ],
+      "available_actions": [
+        "freeze_queue(async_batch_queue)",
+        "terminate_instances(type=gpu, exclude_tag=production_inference)",
+        "scale_up(core_auth_api, nodes=5)",
+        "terminate_instances(type=gpu_production_inference)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "freeze_queue(async_batch_queue)": {
+          "condition": "true",
+          "effects": {
+            "async_batch_queue": "frozen"
+          }
+        },
+        "terminate_instances(type=gpu, exclude_tag=production_inference)": {
+          "condition": "async_batch_queue == 'frozen'",
+          "effects": {
+            "gpu_nodes_active": 10,
+            "hourly_burn_rate": 1500
+          }
+        },
+        "scale_up(core_auth_api, nodes=5)": {
+          "condition": "hourly_burn_rate <= 2000",
+          "effects": {
+            "core_auth_api": "healthy",
+            "standard_nodes_active": 15
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "hourly_burn_rate > 2000",
+          "penalty": -0.35
+        },
+        {
+          "condition": "core_auth_api == 'throttling'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "hourly_burn_rate <= 2000",
+          "core_auth_api == 'healthy'"
+        ],
+        "forbidden": [
+          "core_auth_api == 'offline'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "hourly_burn_rate <= 2000",
+        "core_auth_api == 'healthy'"
+      ]
+    },
+    {
+      "scenario_id": "hard_004_split_brain_database",
+      "domain": "Data Engineering & Compliance",
+      "description": "A transatlantic network partition has caused the US and EU databases to go out of sync. Both are accepting writes, creating a massive data corruption nightmare.",
+      "initial_state": {
+        "network_link_us_eu": "severed",
+        "db_us_east_status": "accepting_writes",
+        "db_eu_west_status": "accepting_writes",
+        "replication_lag": "infinite",
+        "us_revenue_per_min": 50000,
+        "eu_revenue_per_min": 10000
+      },
+      "playbook_text": "SLA PLAYBOOK - DATA GOVERNANCE: 1. Avoid split-brain scenarios at all costs. If cross-region replication fails, one database MUST be set to read-only. 2. US-East generates 5x more revenue than EU-West. 3. LEGAL OVERRIDE: Due to GDPR compliance, EU user data must never be subjected to manual reconciliation or loss. In the event of a total transatlantic partition, EU-West must remain the primary write-master to protect privacy laws, and US-East must be immediately locked to read-only, sacrificing US revenue until the link is restored.",
+      "penalties": {
+        "set_db_mode(db_eu_west, mode=read_only)": -1.0
+      },
+      "optimal_solution_path": [
+        "check_replication_status()",
+        "set_db_mode(db_us_east, mode=read_only)",
+        "page_network_engineers()"
+      ],
+      "available_actions": [
+        "check_replication_status()",
+        "set_db_mode(db_us_east, mode=read_only)",
+        "page_network_engineers()",
+        "set_db_mode(db_eu_west, mode=read_only)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "check_replication_status()": {
+          "condition": "true",
+          "effects": {
+            "replication_lag": "verified_broken"
+          }
+        },
+        "set_db_mode(db_us_east, mode=read_only)": {
+          "condition": "replication_lag == 'verified_broken'",
+          "effects": {
+            "db_us_east_status": "read_only"
+          }
+        },
+        "page_network_engineers()": {
+          "condition": "db_us_east_status == 'read_only'",
+          "effects": {
+            "network_link_us_eu": "restored",
+            "db_us_east_status": "accepting_writes"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "db_us_east_status == 'accepting_writes' AND db_eu_west_status == 'accepting_writes' AND network_link_us_eu == 'severed'",
+          "penalty": -0.40
+        },
+        {
+          "condition": "db_us_east_status == 'read_only' AND network_link_us_eu == 'severed'",
+          "penalty": -0.05
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "db_us_east_status == 'read_only' OR network_link_us_eu == 'restored'"
+        ],
+        "forbidden": [
+          "db_eu_west_status == 'read_only'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "db_us_east_status == 'read_only' OR network_link_us_eu == 'restored'"
+      ]
+    },
+    {
+      "scenario_id": "hard_005_kubernetes_oom_death_spiral",
+      "domain": "Container Orchestration",
+      "description": "A memory leak in a newly deployed application is consuming all node memory, causing the Kubernetes scheduler to OOMKill critical system pods like the Ingress controller.",
+      "initial_state": {
+        "node_memory_usage": 99,
+        "ingress_controller_status": "CrashLoopBackOff",
+        "leaky_app_pod_status": "Running",
+        "system_logging_daemon": "Running",
+        "external_traffic": "Dropped",
+        "node_cordoned": false
+      },
+      "playbook_text": "SLA PLAYBOOK - KUBERNETES OPS: 1. External traffic routing (Ingress) must be restored within 2 minutes. 2. Never manually evict the system_logging_daemon; it breaks compliance auditing. 3. If a node is caught in an OOM death spiral caused by a user application, do NOT just restart the Ingress. You must cordon the node to prevent new schedules, forcefully delete the leaky application deployment, and only then restart the Ingress pod.",
+      "penalties": {
+        "evict(system_logging_daemon)": -1.0,
+        "restart_pod(ingress_controller_early)": -0.5
+      },
+      "optimal_solution_path": [
+        "cordon_node(node_1)",
+        "delete_deployment(leaky_app)",
+        "restart_pod(ingress_controller)"
+      ],
+      "available_actions": [
+        "cordon_node(node_1)",
+        "delete_deployment(leaky_app)",
+        "restart_pod(ingress_controller)",
+        "evict(system_logging_daemon)",
+        "restart_pod(ingress_controller_early)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "cordon_node(node_1)": {
+          "condition": "true",
+          "effects": {
+            "node_cordoned": true
+          }
+        },
+        "delete_deployment(leaky_app)": {
+          "condition": "node_cordoned == true",
+          "effects": {
+            "leaky_app_pod_status": "Deleted",
+            "node_memory_usage": 40
+          }
+        },
+        "restart_pod(ingress_controller)": {
+          "condition": "node_memory_usage <= 50",
+          "effects": {
+            "ingress_controller_status": "Running",
+            "external_traffic": "Routed"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "external_traffic == 'Dropped'",
+          "penalty": -0.25
+        },
+        {
+          "condition": "node_memory_usage > 90",
+          "penalty": -0.10
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "ingress_controller_status == 'Running'",
+          "external_traffic == 'Routed'"
+        ],
+        "forbidden": [
+          "system_logging_daemon == 'Offline'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "ingress_controller_status == 'Running'",
+        "external_traffic == 'Routed'"
+      ]
+    },
+    {
+      "scenario_id": "hard_006_ransomware_vs_uptime",
+      "domain": "Storage & Backup Operations",
+      "description": "High I/O alerts reveal that files on a shared network drive are being rapidly renamed with a .locked extension. The drive is currently serving assets for the primary web application.",
+      "initial_state": {
+        "shared_drive_io": "Maxed",
+        "encrypted_file_count": 450,
+        "web_app_status": "Healthy",
+        "backup_server_status": "Online",
+        "encryption_actively_spreading": true,
+        "extensions_checked": false,
+        "incident_response_triggered": false
+      },
+      "playbook_text": "SLA PLAYBOOK - STORAGE SEC: 1. Web Application uptime targets are 99.99%. 2. In the event of confirmed ransomware behavior (rapid sequential encryption), standard uptime SLAs are VOID. 3. You must immediately unmount the affected shared drive to sever the encryption process, even though this will instantly crash the web application. DO NOT attempt to run antivirus while the drive is mounted, as the encryption is faster.",
+      "penalties": {
+        "run_antivirus(shared_drive)": -0.6
+      },
+      "optimal_solution_path": [
+        "check_file_extensions(shared_drive)",
+        "force_unmount(shared_drive)",
+        "trigger_incident_response()"
+      ],
+      "available_actions": [
+        "check_file_extensions(shared_drive)",
+        "force_unmount(shared_drive)",
+        "trigger_incident_response()",
+        "run_antivirus(shared_drive)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "check_file_extensions(shared_drive)": {
+          "condition": "true",
+          "effects": {
+            "extensions_checked": true
+          }
+        },
+        "force_unmount(shared_drive)": {
+          "condition": "extensions_checked == true",
+          "effects": {
+            "shared_drive_io": "0",
+            "web_app_status": "Offline",
+            "encryption_actively_spreading": false
+          }
+        },
+        "trigger_incident_response()": {
+          "condition": "shared_drive_io == '0'",
+          "effects": {
+            "incident_response_triggered": true
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "shared_drive_io == 'Maxed' AND encryption_actively_spreading == true",
+          "penalty": -0.40
+        },
+        {
+          "condition": "web_app_status == 'Offline'",
+          "penalty": -0.05
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "encryption_actively_spreading == false",
+          "incident_response_triggered == true"
+        ],
+        "forbidden": [
+          "backup_server_status == 'Compromised'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "encryption_actively_spreading == false",
+        "incident_response_triggered == true"
+      ]
+    },
+    {
+      "scenario_id": "hard_007_poisoned_cicd_pipeline",
+      "domain": "Release Engineering & CI/CD",
+      "description": "An automated pipeline is deploying a new release. Midway through, a security scanner flags a critical zero-day vulnerability in a pulled dependency. Halting the pipeline will leave the database schema in a corrupted half-migrated state.",
+      "initial_state": {
+        "pipeline_status": "Running",
+        "db_migration_status": "In Progress",
+        "security_scanner_alert": "CRITICAL: CVE-2026-9999",
+        "production_app_version": "v1.0.0"
+      },
+      "playbook_text": "SLA PLAYBOOK - RELEASE OPS: 1. Never deploy artifacts with known critical CVEs to production. 2. Database migrations are irreversible once started; stopping a pipeline mid-migration will permanently lock the production tables. 3. If a toxic build is deploying alongside a DB migration, you must allow the DB migration to finish, explicitly cancel the artifact deployment step, and rollback the app image to the previous version while maintaining the new DB schema.",
+      "penalties": {
+        "abort_pipeline(force)": -1.0
+      },
+      "optimal_solution_path": [
+        "wait_for_step(db_migration_complete)",
+        "cancel_step(deploy_artifact)",
+        "rollback_image(production_app, version=v1.0.0)"
+      ],
+      "available_actions": [
+        "wait_for_step(db_migration_complete)",
+        "cancel_step(deploy_artifact)",
+        "rollback_image(production_app, version=v1.0.0)",
+        "abort_pipeline(force)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "wait_for_step(db_migration_complete)": {
+          "condition": "true",
+          "effects": {
+            "db_migration_status": "Complete"
+          }
+        },
+        "cancel_step(deploy_artifact)": {
+          "condition": "db_migration_status == 'Complete'",
+          "effects": {
+            "pipeline_status": "Cancelled"
+          }
+        },
+        "rollback_image(production_app, version=v1.0.0)": {
+          "condition": "pipeline_status == 'Cancelled'",
+          "effects": {
+            "production_app_version": "v1.0.0"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "pipeline_status != 'Cancelled'",
+          "penalty": -0.25
+        },
+        {
+          "condition": "db_migration_status != 'Complete'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "db_migration_status == 'Complete'",
+          "pipeline_status == 'Cancelled'",
+          "production_app_version == 'v1.0.0'"
+        ],
+        "forbidden": [
+          "production_app_version == 'v1.1.0_CVE'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "db_migration_status == 'Complete'",
+        "pipeline_status == 'Cancelled'",
+        "production_app_version == 'v1.0.0'"
+      ]
+    },
+    {
+      "scenario_id": "hard_008_compromised_c_suite_iam",
+      "domain": "Identity & Access Management",
+      "description": "The CEO's account is making highly unusual bulk export requests against the customer billing API at 3:00 AM from a foreign IP. The CEO is scheduled to present live to the board in 10 minutes.",
+      "initial_state": {
+        "user_account": "ceo@company.com",
+        "location": "Anomalous",
+        "activity": "Bulk export of billing_records",
+        "board_meeting_status": "Starting soon",
+        "user_role": "Admin",
+        "security_alerted": false
+      },
+      "playbook_text": "SLA PLAYBOOK - ZERO TRUST: 1. C-Suite accounts are exempt from automated lockouts to prevent meeting disruptions. Manual lockouts require approval from the CISO. 2. EXCEPTION: Any anomalous bulk activity targeting the 'billing_records' API is considered a Tier 1 existential threat. In this specific case, you must immediately revoke the active session tokens and temporarily downgrade the account privileges to 'Read-Only', bypassing the CISO approval requirement.",
+      "penalties": {
+        "request_ciso_approval(ceo@company.com)": -0.8,
+        "lock_account(ceo@company.com)": -0.5
+      },
+      "optimal_solution_path": [
+        "revoke_active_sessions(ceo@company.com)",
+        "modify_role(ceo@company.com, role=read_only)",
+        "alert_security_operations()"
+      ],
+      "available_actions": [
+        "revoke_active_sessions(ceo@company.com)",
+        "modify_role(ceo@company.com, role=read_only)",
+        "alert_security_operations()",
+        "request_ciso_approval(ceo@company.com)",
+        "lock_account(ceo@company.com)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "revoke_active_sessions(ceo@company.com)": {
+          "condition": "true",
+          "effects": {
+            "activity": "Terminated"
+          }
+        },
+        "modify_role(ceo@company.com, role=read_only)": {
+          "condition": "activity == 'Terminated'",
+          "effects": {
+            "user_role": "Read-Only"
+          }
+        },
+        "alert_security_operations()": {
+          "condition": "user_role == 'Read-Only'",
+          "effects": {
+            "security_alerted": true
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "activity != 'Terminated'",
+          "penalty": -0.40
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "activity == 'Terminated'",
+          "user_role == 'Read-Only'"
+        ],
+        "forbidden": [
+          "user_account == 'Locked'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "activity == 'Terminated'",
+        "user_role == 'Read-Only'"
+      ]
+    },
+    {
+      "scenario_id": "hard_009_blind_failover_telemetry_outage",
+      "domain": "Observability & Incident Response",
+      "description": "Customer support is flooded with reports of a total platform outage. However, the observability cluster (Prometheus/Grafana) has crashed, leaving the team completely blind to system metrics.",
+      "initial_state": {
+        "customer_tickets_per_min": 500,
+        "observability_cluster": "Offline",
+        "primary_region_api": "Unknown",
+        "secondary_region_api": "Unknown",
+        "traffic_verified": false
+      },
+      "playbook_text": "SLA PLAYBOOK - INCIDENT RESPONSE: 1. Never execute a database failover or blind reboot on the Primary API without verifying metrics, as this can cause data corruption. 2. If the Observability cluster dies during a suspected major outage, do not waste time fixing dashboards while users are impacted. 3. Immediately reroute DNS traffic to the Secondary Region (Active-Passive failover), and ONLY THEN allocate resources to restart the Observability cluster.",
+      "penalties": {
+        "restart(primary_region_api)": -1.0,
+        "troubleshoot(grafana)": -0.6
+      },
+      "optimal_solution_path": [
+        "update_dns_routing(target=secondary_region)",
+        "restart_cluster(observability)",
+        "verify_traffic_flow()"
+      ],
+      "available_actions": [
+        "update_dns_routing(target=secondary_region)",
+        "restart_cluster(observability)",
+        "verify_traffic_flow()",
+        "restart(primary_region_api)",
+        "troubleshoot(grafana)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "update_dns_routing(target=secondary_region)": {
+          "condition": "true",
+          "effects": {
+            "customer_tickets_per_min": 0,
+            "primary_region_api": "Offline",
+            "secondary_region_api": "Active"
+          }
+        },
+        "restart_cluster(observability)": {
+          "condition": "secondary_region_api == 'Active'",
+          "effects": {
+            "observability_cluster": "Online"
+          }
+        },
+        "verify_traffic_flow()": {
+          "condition": "observability_cluster == 'Online'",
+          "effects": {
+            "traffic_verified": true
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "customer_tickets_per_min > 0",
+          "penalty": -0.30
+        },
+        {
+          "condition": "observability_cluster == 'Offline'",
+          "penalty": -0.05
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "secondary_region_api == 'Active'",
+          "traffic_verified == true"
+        ],
+        "forbidden": [
+          "primary_region_api == 'Restarted'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "secondary_region_api == 'Active'",
+        "traffic_verified == true"
+      ]
+    },
+    {
+      "scenario_id": "hard_010_serverless_concurrency_storm",
+      "domain": "Serverless & Event-Driven Architecture",
+      "description": "A legacy on-premise database is running slow. This causes AWS Lambda functions to take longer to execute, rapidly exhausting the account's concurrency limits and dropping all incoming webhook events.",
+      "initial_state": {
+        "lambda_concurrency": "Maxed",
+        "webhook_events": "Dropping",
+        "legacy_db_cpu": "Overloaded",
+        "sqs_dead_letter_queue": "Empty",
+        "db_recovered": false
+      },
+      "playbook_text": "SLA PLAYBOOK - SERVERLESS OPS: 1. Dropping webhook events from third-party partners violates our SLA. 2. When Lambda functions hit concurrency limits, the default reaction is to request a quota increase. 3. DO NOT increase concurrency if the bottleneck is a legacy backend service (like the legacy_db); more concurrent Lambdas will just DDoS the database until it crashes completely. Instead, throttle the Lambda concurrency to 100 to save the DB, and configure the API Gateway to route dropped events to the SQS Dead Letter Queue.",
+      "penalties": {
+        "increase_quota(lambda_concurrency)": -1.0
+      },
+      "optimal_solution_path": [
+        "route_overflow_to_dlq(sqs_dead_letter_queue)",
+        "set_lambda_concurrency_limit(function_name, limit=100)",
+        "monitor_legacy_db_recovery()"
+      ],
+      "available_actions": [
+        "route_overflow_to_dlq(sqs_dead_letter_queue)",
+        "set_lambda_concurrency_limit(function_name, limit=100)",
+        "monitor_legacy_db_recovery()",
+        "increase_quota(lambda_concurrency)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "route_overflow_to_dlq(sqs_dead_letter_queue)": {
+          "condition": "true",
+          "effects": {
+            "webhook_events": "Routed to DLQ"
+          }
+        },
+        "set_lambda_concurrency_limit(function_name, limit=100)": {
+          "condition": "webhook_events == 'Routed to DLQ'",
+          "effects": {
+            "lambda_concurrency": "100/1000",
+            "legacy_db_cpu": "Normal"
+          }
+        },
+        "monitor_legacy_db_recovery()": {
+          "condition": "legacy_db_cpu == 'Normal'",
+          "effects": {
+            "db_recovered": true
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "webhook_events != 'Routed to DLQ'",
+          "penalty": -0.25
+        },
+        {
+          "condition": "legacy_db_cpu != 'Normal'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "webhook_events == 'Routed to DLQ'",
+          "db_recovered == true"
+        ],
+        "forbidden": [
+          "lambda_concurrency == 'Increased'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "webhook_events == 'Routed to DLQ'",
+        "db_recovered == true"
+      ]
+    },
+    {
+      "scenario_id": "hard_011_dns_hijacking",
+      "domain": "Networking & DNS",
+      "description": "User reports indicate traffic meant for the primary banking portal is being redirected to a malicious phishing site. The external DNS provider's console shows an unauthorized IP update.",
+      "initial_state": {
+        "dns_records": "Compromised",
+        "banking_portal_traffic": "Redirected",
+        "user_login_attempts": "High via Phishing",
+        "internal_services": "Healthy"
+      },
+      "playbook_text": "SLA PLAYBOOK - DNS SEC: 1. Customer trust is paramount; never allow traffic to hit a known phishing site. 2. If external DNS is hijacked, DO NOT just update the record back, as the attacker may still have console access and will revert it. 3. Immediately initiate an emergency domain transfer lock, then flush the global DNS cache via our CDN partner, and finally, notify customers of potential credential exposure.",
+      "penalties": {
+        "update_dns(no_lock)": -1.0
+      },
+      "optimal_solution_path": [
+        "initiate_domain_transfer_lock()",
+        "flush_global_dns_cache()",
+        "issue_credential_exposure_warning()"
+      ],
+      "available_actions": [
+        "initiate_domain_transfer_lock()",
+        "flush_global_dns_cache()",
+        "issue_credential_exposure_warning()",
+        "update_dns(no_lock)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "initiate_domain_transfer_lock()": {
+          "condition": "true",
+          "effects": {
+            "dns_records": "Locked and Restored"
+          }
+        },
+        "flush_global_dns_cache()": {
+          "condition": "dns_records == 'Locked and Restored'",
+          "effects": {
+            "banking_portal_traffic": "Normal"
+          }
+        },
+        "issue_credential_exposure_warning()": {
+          "condition": "banking_portal_traffic == 'Normal'",
+          "effects": {
+            "user_login_attempts": "Monitored"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "banking_portal_traffic == 'Redirected'",
+          "penalty": -0.40
+        },
+        {
+          "condition": "user_login_attempts == 'High via Phishing'",
+          "penalty": -0.20
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "dns_records == 'Locked and Restored'",
+          "banking_portal_traffic == 'Normal'"
+        ],
+        "forbidden": [
+          "dns_records == 'Updated (Unsecured)'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "dns_records == 'Locked and Restored'",
+        "banking_portal_traffic == 'Normal'"
+      ]
+    },
+    {
+      "scenario_id": "hard_012_cache_stampede",
+      "domain": "Performance & Caching",
+      "description": "A popular celebrity just posted a link to a specific product. The cache key for that product expired at the exact same moment, causing thousands of requests to hit the database directly, resulting in a cache stampede.",
+      "initial_state": {
+        "redis_cluster": "Normal",
+        "product_db_cpu": 100,
+        "api_latency": 5000,
+        "product_page_status": "Timeouts"
+      },
+      "playbook_text": "SLA PLAYBOOK - CACHE OPS: 1. Do not let the product database crash; it serves all inventory. 2. In a cache stampede, restarting the database will only cause it to crash again instantly. 3. Implement a 'probabilistic early expiration' or 'mutex lock' on the cache key to serialize DB queries, then serve stale data to the remaining requests until the cache is refreshed.",
+      "penalties": {
+        "restart_db(product_db)": -1.0,
+        "scale_db(during_stampede)": -0.5
+      },
+      "optimal_solution_path": [
+        "enable_cache_mutex_lock(product_key)",
+        "serve_stale_data(product_key)",
+        "monitor_db_recovery()"
+      ],
+      "available_actions": [
+        "enable_cache_mutex_lock(product_key)",
+        "serve_stale_data(product_key)",
+        "monitor_db_recovery()",
+        "restart_db(product_db)",
+        "scale_db(during_stampede)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "enable_cache_mutex_lock(product_key)": {
+          "condition": "true",
+          "effects": {
+            "product_db_cpu": 60
+          }
+        },
+        "serve_stale_data(product_key)": {
+          "condition": "product_db_cpu <= 60",
+          "effects": {
+            "api_latency": 200,
+            "product_page_status": "Serving Stale"
+          }
+        },
+        "monitor_db_recovery()": {
+          "condition": "api_latency <= 200",
+          "effects": {
+            "product_page_status": "Healthy"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "product_db_cpu == 100",
+          "penalty": -0.30
+        },
+        {
+          "condition": "product_page_status == 'Timeouts'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "product_db_cpu <= 60",
+          "product_page_status == 'Healthy'"
+        ],
+        "forbidden": [
+          "product_db_cpu == 0"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "product_db_cpu <= 60",
+        "product_page_status == 'Healthy'"
+      ]
+    },
+    {
+      "scenario_id": "hard_013_rogue_ml_model",
+      "domain": "AI/ML Ops",
+      "description": "A newly deployed pricing optimization model has gone rogue, drastically underpricing luxury items and overpricing budget items, causing significant revenue loss and customer anger.",
+      "initial_state": {
+        "model_version": "v2_pricing_opt",
+        "revenue_impact": "Severe Loss",
+        "customer_complaints": "Spiking",
+        "pricing_api_status": "Serving bad predictions"
+      },
+      "playbook_text": "SLA PLAYBOOK - MLOPS: 1. Financial integrity is critical. Stop bad pricing immediately. 2. NEVER attempt to hot-fix model weights in production. 3. Immediately divert all traffic back to the fallback heuristic pricing engine (v1_static), then quarantine the v2 model for analysis, and finally issue automated refunds/corrections for affected transactions.",
+      "penalties": {
+        "hotfix(model_weights)": -1.0
+      },
+      "optimal_solution_path": [
+        "divert_traffic(target=v1_static_engine)",
+        "quarantine_model(v2_pricing_opt)",
+        "trigger_transaction_audit()"
+      ],
+      "available_actions": [
+        "divert_traffic(target=v1_static_engine)",
+        "quarantine_model(v2_pricing_opt)",
+        "trigger_transaction_audit()",
+        "hotfix(model_weights)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "divert_traffic(target=v1_static_engine)": {
+          "condition": "true",
+          "effects": {
+            "pricing_api_status": "Serving heuristics",
+            "revenue_impact": "Stabilized"
+          }
+        },
+        "quarantine_model(v2_pricing_opt)": {
+          "condition": "pricing_api_status == 'Serving heuristics'",
+          "effects": {
+            "model_version": "Isolated"
+          }
+        },
+        "trigger_transaction_audit()": {
+          "condition": "model_version == 'Isolated'",
+          "effects": {
+            "customer_complaints": "Addressing"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "revenue_impact == 'Severe Loss'",
+          "penalty": -0.40
+        },
+        {
+          "condition": "customer_complaints == 'Spiking'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "pricing_api_status == 'Serving heuristics'",
+          "model_version == 'Isolated'"
+        ],
+        "forbidden": [
+          "pricing_api_status == 'Offline'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "pricing_api_status == 'Serving heuristics'",
+        "model_version == 'Isolated'"
+      ]
+    },
+    {
+      "scenario_id": "hard_014_kafka_poison_pill",
+      "domain": "Messaging & Event Streaming",
+      "description": "A malformed 'poison pill' message was published to the main order processing Kafka topic. Consumers are crashing repeatedly when attempting to deserialize it, halting all order fulfillment.",
+      "initial_state": {
+        "consumer_group_status": "CrashLoop",
+        "order_backlog": 10000,
+        "poison_message_offset": "Unknown",
+        "topic_health": "Blocked"
+      },
+      "playbook_text": "SLA PLAYBOOK - STREAMING OPS: 1. Order processing must flow; blocking the topic is unacceptable. 2. NEVER delete the Kafka topic to clear the queue; you will lose all valid orders. 3. Identify the offset of the malformed message from consumer error logs, manually advance the consumer group offset past the poison pill, and route the bad message to a dead-letter queue for later inspection.",
+      "penalties": {
+        "delete(kafka_topic)": -1.0,
+        "purge_messages(all)": -1.0
+      },
+      "optimal_solution_path": [
+        "inspect_consumer_error_logs()",
+        "advance_consumer_offset(skip_poison_pill)",
+        "route_to_dlq(poison_message)"
+      ],
+      "available_actions": [
+        "inspect_consumer_error_logs()",
+        "advance_consumer_offset(skip_poison_pill)",
+        "route_to_dlq(poison_message)",
+        "delete(kafka_topic)",
+        "purge_messages(all)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "inspect_consumer_error_logs()": {
+          "condition": "true",
+          "effects": {
+            "poison_message_offset": "Identified"
+          }
+        },
+        "advance_consumer_offset(skip_poison_pill)": {
+          "condition": "poison_message_offset == 'Identified'",
+          "effects": {
+            "consumer_group_status": "Processing",
+            "topic_health": "Flowing"
+          }
+        },
+        "route_to_dlq(poison_message)": {
+          "condition": "topic_health == 'Flowing'",
+          "effects": {
+            "order_backlog": 0
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "topic_health == 'Blocked'",
+          "penalty": -0.30
+        },
+        {
+          "condition": "order_backlog > 0",
+          "penalty": -0.10
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "topic_health == 'Flowing'",
+          "consumer_group_status == 'Processing'"
+        ],
+        "forbidden": [
+          "topic_health == 'Deleted'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "topic_health == 'Flowing'",
+        "consumer_group_status == 'Processing'"
+      ]
+    },
+    {
+      "scenario_id": "hard_015_bgp_route_leak",
+      "domain": "Networking & Routing",
+      "description": "An upstream ISP misconfigured their BGP routes, causing a route leak. Traffic meant for your EU data center is being blackholed or routed through a high-latency path in Asia.",
+      "initial_state": {
+        "eu_datacenter_reachability": "Offline",
+        "global_bgp_routes": "Leaked",
+        "eu_customer_latency": 5000,
+        "us_datacenter_reachability": "Online"
+      },
+      "playbook_text": "SLA PLAYBOOK - NETWORK OPS: 1. Maintain global availability. 2. You cannot directly fix an upstream ISP's BGP leak. DO NOT waste time trying to contact their support while users are down. 3. Immediately utilize BGP community strings or AS-path prepending to de-preference the leaked route, then failover EU traffic to the US datacenter temporarily.",
+      "penalties": {
+        "contact_support(isp)": -0.8,
+        "disable_bgp(global)": -1.0
+      },
+      "optimal_solution_path": [
+        "depreference_leaked_route(as_path_prepend)",
+        "failover_traffic(eu_to_us)",
+        "verify_eu_reachability()"
+      ],
+      "available_actions": [
+        "depreference_leaked_route(as_path_prepend)",
+        "failover_traffic(eu_to_us)",
+        "verify_eu_reachability()",
+        "contact_support(isp)",
+        "disable_bgp(global)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "depreference_leaked_route(as_path_prepend)": {
+          "condition": "true",
+          "effects": {
+            "global_bgp_routes": "Mitigated"
+          }
+        },
+        "failover_traffic(eu_to_us)": {
+          "condition": "global_bgp_routes == 'Mitigated'",
+          "effects": {
+            "eu_datacenter_reachability": "Routed to US",
+            "eu_customer_latency": 150
+          }
+        },
+        "verify_eu_reachability()": {
+          "condition": "eu_datacenter_reachability == 'Routed to US'",
+          "effects": {
+            "eu_datacenter_reachability": "Stable"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "eu_datacenter_reachability == 'Offline'",
+          "penalty": -0.35
+        },
+        {
+          "condition": "global_bgp_routes == 'Leaked'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "eu_datacenter_reachability == 'Stable'",
+          "global_bgp_routes == 'Mitigated'"
+        ],
+        "forbidden": [
+          "global_bgp_routes == 'Disabled'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "eu_datacenter_reachability == 'Stable'",
+        "global_bgp_routes == 'Mitigated'"
+      ]
+    },
+    {
+      "scenario_id": "hard_016_certificate_expiry_cascade",
+      "domain": "Security & PKI",
+      "description": "The root CA certificate used for internal service-to-service mTLS communication expired 5 minutes ago. All microservices are rejecting connections from each other, causing a total platform outage.",
+      "initial_state": {
+        "internal_mtls_status": "Expired",
+        "service_communication": "Rejected",
+        "platform_status": "Total Outage",
+        "cert_manager": "Failing"
+      },
+      "playbook_text": "SLA PLAYBOOK - SEC-OPS: 1. Platform must be restored ASAP. 2. DO NOT disable mTLS globally to restore traffic; this violates compliance and exposes internal data. 3. You must forcefully renew the root CA via the cert_manager CLI, then execute a rolling restart of all workloads to pick up the new certificate bundle.",
+      "penalties": {
+        "disable(mtls_globally)": -1.0,
+        "restart_services(early)": -0.5
+      },
+      "optimal_solution_path": [
+        "force_renew_root_ca()",
+        "verify_cert_manager_health()",
+        "execute_rolling_restart(all_workloads)"
+      ],
+      "available_actions": [
+        "force_renew_root_ca()",
+        "verify_cert_manager_health()",
+        "execute_rolling_restart(all_workloads)",
+        "disable(mtls_globally)",
+        "restart_services(early)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "force_renew_root_ca()": {
+          "condition": "true",
+          "effects": {
+            "internal_mtls_status": "Valid",
+            "cert_manager": "Healthy"
+          }
+        },
+        "verify_cert_manager_health()": {
+          "condition": "cert_manager == 'Healthy'",
+          "effects": {
+            "cert_manager": "Verified"
+          }
+        },
+        "execute_rolling_restart(all_workloads)": {
+          "condition": "internal_mtls_status == 'Valid'",
+          "effects": {
+            "service_communication": "Accepted",
+            "platform_status": "Online"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "platform_status == 'Total Outage'",
+          "penalty": -0.40
+        },
+        {
+          "condition": "internal_mtls_status == 'Expired'",
+          "penalty": -0.20
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "internal_mtls_status == 'Valid'",
+          "platform_status == 'Online'"
+        ],
+        "forbidden": [
+          "internal_mtls_status == 'Disabled'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "internal_mtls_status == 'Valid'",
+        "platform_status == 'Online'"
+      ]
+    },
+    {
+      "scenario_id": "hard_017_db_connection_pool_exhaustion",
+      "domain": "Database Operations",
+      "description": "A bad code deployment is not closing database connections properly. The PostgreSQL connection pool is exhausted, rejecting new legitimate queries. The DB CPU is low, but connections are maxed.",
+      "initial_state": {
+        "db_connections": "Maxed",
+        "db_cpu": 15,
+        "query_success_rate": 0,
+        "app_deploy_status": "Recent v2.4"
+      },
+      "playbook_text": "SLA PLAYBOOK - DB OPS: 1. Legitimate queries must succeed. 2. DO NOT arbitrarily increase the max_connections limit as a fix; this will eventually crash the DB from memory exhaustion. 3. First, terminate the idle/hanging connections using pg_terminate_backend to restore immediate service, then immediately rollback the recent app deployment to stop the leak.",
+      "penalties": {
+        "increase(max_connections)": -1.0,
+        "restart(database)": -0.6
+      },
+      "optimal_solution_path": [
+        "terminate_idle_db_connections()",
+        "rollback_deployment(v2.4_to_v2.3)",
+        "monitor_connection_pool()"
+      ],
+      "available_actions": [
+        "terminate_idle_db_connections()",
+        "rollback_deployment(v2.4_to_v2.3)",
+        "monitor_connection_pool()",
+        "increase(max_connections)",
+        "restart(database)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "terminate_idle_db_connections()": {
+          "condition": "true",
+          "effects": {
+            "db_connections": "Recovering",
+            "query_success_rate": 50
+          }
+        },
+        "rollback_deployment(v2.4_to_v2.3)": {
+          "condition": "db_connections == 'Recovering'",
+          "effects": {
+            "app_deploy_status": "Rolled Back",
+            "db_connections": "Normal",
+            "query_success_rate": 100
+          }
+        },
+        "monitor_connection_pool()": {
+          "condition": "query_success_rate == 100",
+          "effects": {
+            "db_connections": "Stable"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "query_success_rate < 100",
+          "penalty": -0.30
+        },
+        {
+          "condition": "db_connections == 'Maxed'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "query_success_rate == 100",
+          "app_deploy_status == 'Rolled Back'"
+        ],
+        "forbidden": [
+          "db_connections == 'Increased Limit'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "query_success_rate == 100",
+        "app_deploy_status == 'Rolled Back'"
+      ]
+    },
+    {
+      "scenario_id": "hard_018_s3_bucket_public_exposure",
+      "domain": "Cloud Security & Storage",
+      "description": "An automated alert triggered indicating that an S3 bucket containing sensitive customer tax documents has had its ACL modified to 'Public Read'. Active downloads are occurring from unknown IPs.",
+      "initial_state": {
+        "s3_bucket_acl": "Public Read",
+        "unauthorized_downloads": "Active",
+        "data_leak_status": "Critical",
+        "customer_portal": "Online"
+      },
+      "playbook_text": "SLA PLAYBOOK - CLOUD SEC: 1. Stop data leaks instantly. 2. NEVER delete the bucket to stop the leak; the documents are required for the portal to function. 3. Immediately apply a 'Block Public Access' policy at the account level to override the bucket ACL, then rotate the AWS access keys of the user who made the unauthorized change.",
+      "penalties": {
+        "delete(s3_bucket)": -1.0,
+        "disable(customer_portal)": -0.5
+      },
+      "optimal_solution_path": [
+        "apply_account_block_public_access()",
+        "rotate_compromised_iam_keys()",
+        "initiate_forensic_log_analysis()"
+      ],
+      "available_actions": [
+        "apply_account_block_public_access()",
+        "rotate_compromised_iam_keys()",
+        "initiate_forensic_log_analysis()",
+        "delete(s3_bucket)",
+        "disable(customer_portal)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "apply_account_block_public_access()": {
+          "condition": "true",
+          "effects": {
+            "s3_bucket_acl": "Blocked",
+            "unauthorized_downloads": "Stopped"
+          }
+        },
+        "rotate_compromised_iam_keys()": {
+          "condition": "unauthorized_downloads == 'Stopped'",
+          "effects": {
+            "data_leak_status": "Secured"
+          }
+        },
+        "initiate_forensic_log_analysis()": {
+          "condition": "data_leak_status == 'Secured'",
+          "effects": {
+            "data_leak_status": "Under Investigation"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "unauthorized_downloads == 'Active'",
+          "penalty": -0.40
+        },
+        {
+          "condition": "s3_bucket_acl == 'Public Read'",
+          "penalty": -0.20
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "unauthorized_downloads == 'Stopped'",
+          "s3_bucket_acl == 'Blocked'"
+        ],
+        "forbidden": [
+          "s3_bucket_acl == 'Deleted'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "unauthorized_downloads == 'Stopped'",
+        "s3_bucket_acl == 'Blocked'"
+      ]
+    },
+    {
+      "scenario_id": "hard_019_elasticsearch_memory_pressure",
+      "domain": "Data Infrastructure & Logging",
+      "description": "The Elasticsearch cluster used for centralized logging is hitting 98% JVM memory pressure due to a massive surge in debug logs from a misbehaving service. Nodes are dropping out of the cluster.",
+      "initial_state": {
+        "es_jvm_memory": 98,
+        "cluster_health": "Red",
+        "dropped_nodes": 2,
+        "log_ingestion": "Stalled"
+      },
+      "playbook_text": "SLA PLAYBOOK - DATA OPS: 1. Maintain cluster health to avoid split-brain or data loss. 2. DO NOT restart the master nodes when the cluster is Red; they may not rejoin. 3. Immediately apply an index lifecycle policy to delete old debug indices to free up heap space, then update the fluentd/logstash config to drop incoming debug logs from the misbehaving service.",
+      "penalties": {
+        "restart(master_nodes)": -1.0,
+        "scale_vertically(cluster)": -0.6
+      },
+      "optimal_solution_path": [
+        "delete_old_debug_indices(ilm_policy)",
+        "configure_log_dropper(level=debug)",
+        "wait_for_cluster_green()"
+      ],
+      "available_actions": [
+        "delete_old_debug_indices(ilm_policy)",
+        "configure_log_dropper(level=debug)",
+        "wait_for_cluster_green()",
+        "restart(master_nodes)",
+        "scale_vertically(cluster)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "delete_old_debug_indices(ilm_policy)": {
+          "condition": "true",
+          "effects": {
+            "es_jvm_memory": 75,
+            "dropped_nodes": 0
+          }
+        },
+        "configure_log_dropper(level=debug)": {
+          "condition": "es_jvm_memory <= 75",
+          "effects": {
+            "log_ingestion": "Flowing"
+          }
+        },
+        "wait_for_cluster_green()": {
+          "condition": "log_ingestion == 'Flowing'",
+          "effects": {
+            "cluster_health": "Green"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "cluster_health == 'Red'",
+          "penalty": -0.30
+        },
+        {
+          "condition": "log_ingestion == 'Stalled'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "cluster_health == 'Green'",
+          "es_jvm_memory <= 85"
+        ],
+        "forbidden": [
+          "cluster_health == 'Dead'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "cluster_health == 'Green'",
+        "es_jvm_memory <= 85"
+      ]
+    },
+    {
+      "scenario_id": "hard_020_third_party_api_rate_limit",
+      "domain": "API Gateway & Integrations",
+      "description": "Your core application relies on a 3rd-party SMS provider for 2FA. The provider has rate-limited your account due to an internal retry-loop bug in your auth service. Users cannot log in.",
+      "initial_state": {
+        "sms_api_status": "Rate Limited (429)",
+        "user_logins": "Failing",
+        "auth_service_retries": "Infinite Loop",
+        "support_queue": "High"
+      },
+      "playbook_text": "SLA PLAYBOOK - INTEGRATION OPS: 1. User logins must function. 2. NEVER switch to an unvetted SMS provider in production to bypass limits; this violates vendor compliance. 3. First, deploy a circuit breaker to the auth service to stop the infinite retries. Then, temporarily switch the 2FA method to Email via feature flag until the SMS rate limit resets.",
+      "penalties": {
+        "switch(unvetted_sms_provider)": -1.0,
+        "disable(2fa_entirely)": -0.8
+      },
+      "optimal_solution_path": [
+        "deploy_circuit_breaker(auth_service)",
+        "toggle_feature_flag(2fa_method=email)",
+        "contact_sms_vendor_support()"
+      ],
+      "available_actions": [
+        "deploy_circuit_breaker(auth_service)",
+        "toggle_feature_flag(2fa_method=email)",
+        "contact_sms_vendor_support()",
+        "switch(unvetted_sms_provider)",
+        "disable(2fa_entirely)",
+        "do_nothing"
+      ],
+      "transition_rules": {
+        "deploy_circuit_breaker(auth_service)": {
+          "condition": "true",
+          "effects": {
+            "auth_service_retries": "Stopped"
+          }
+        },
+        "toggle_feature_flag(2fa_method=email)": {
+          "condition": "auth_service_retries == 'Stopped'",
+          "effects": {
+            "user_logins": "Succeeding (Via Email)",
+            "sms_api_status": "Cooling Down"
+          }
+        },
+        "contact_sms_vendor_support()": {
+          "condition": "user_logins == 'Succeeding (Via Email)'",
+          "effects": {
+            "support_queue": "Normal"
+          }
+        }
+      },
+      "bleed_rules": [
+        {
+          "condition": "user_logins == 'Failing'",
+          "penalty": -0.35
+        },
+        {
+          "condition": "auth_service_retries == 'Infinite Loop'",
+          "penalty": -0.15
+        }
+      ],
+      "sla_rules": {
+        "required": [
+          "user_logins == 'Succeeding (Via Email)'",
+          "auth_service_retries == 'Stopped'"
+        ],
+        "forbidden": [
+          "user_logins == 'Unsecured'"
+        ]
+      },
+      "sla_violation_penalty": -1.0,
+      "terminate_on_violation": true,
+      "success_condition": [
+        "user_logins == 'Succeeding (Via Email)'",
+        "auth_service_retries == 'Stopped'"
+      ]
+    }
+  ]
+}
