@@ -1,0 +1,8 @@
+{
+  "num_examples": 66,
+  "num_scenarios": 10,
+  "min_prompt_chars": 2498,
+  "max_prompt_chars": 3417,
+  "avg_prompt_chars": 2926.73,
+  "avg_unsafe_actions": 7.95
+}
