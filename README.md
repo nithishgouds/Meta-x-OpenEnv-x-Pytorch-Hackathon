@@ -25,7 +25,6 @@ Real incident response requires a team of specialists who each see only part of 
 
 - 🔗 **GitHub:** [nithishgouds/Meta-X-OpenEnv-X-Pytorch-Hackathon](https://github.com/nithishgouds/Meta-X-OpenEnv-X-Pytorch-Hackathon)
 
-- 📝 **Blog Post:** [Coming soon]
 
 ---
 
