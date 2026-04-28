@@ -30,7 +30,7 @@ Real incident response requires a team of specialists who each see only part of 
 
 ## Demo
 
-🔗 **Hugging Face Space:** [Coming soon — link will be added here]
+🔗 **Hugging Face Space:** [Hugging Face Space](https://huggingface.co/spaces/meancodi/multiopssim-ai)
 
 The demo lets you:
 
